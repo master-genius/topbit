@@ -1,0 +1,57 @@
+{
+  "name": "topbit",
+  "version": "2.0.0",
+  "description": "A Server-side web framework support http/1.1 and http/2",
+  "main": "src/topbit.js",
+  "directories": {
+    "src": "src"
+  },
+  "bin": {
+    "tbload": "bin/loadinfo.sh",
+    "topbit-new-app": "bin/newapp.js"
+  },
+  "scripts": {
+    "test": "node test/test-service.js",
+    "test-route": "node test/test-route.js"
+  },
+  "keywords": [
+    "top",
+    "topbit",
+    "tit",
+    "tibit",
+    "titbit",
+    "tidbit",
+    "bit",
+    "http",
+    "server",
+    "http/1.1",
+    "http/2",
+    "http2",
+    "web",
+    "middleware",
+    "framework",
+    "tidbit",
+    "proxy",
+    "webserver",
+    "backend",
+    "serverside"
+  ],
+  "homepage": "https://github.com/master-genius/topbit#readme",
+  "bugs": {
+    "url": "https://github.com/master-genius/topbit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/master-genius/topbit.git"
+  },
+  "license": "ISC",
+  "author": "BraveWang",
+  "type": "commonjs",
+  "scripts": {
+    "test": "echo ok"
+  },
+  "dependencies": {
+
+  },
+  "devDependencies": {}
+}
