@@ -50,7 +50,7 @@ class Middleware extends MidCore {
    */
   addFinal() {
     let fr = async (ctx, next) => {
-      await next();
+      await next(ctx);
 
       if (!ctx.res || ctx.res.writableEnded || !ctx.res.writable || ctx.res.destroyed) {
         return;

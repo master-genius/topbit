@@ -1,6 +1,6 @@
 'use strict';
 
-const titbit = require('../lib/titbit.js');
+const titbit = require('../src/topbit.js');
 
 const app = new titbit({
     debug : true,
@@ -20,29 +20,29 @@ const app = new titbit({
 app.use(async (c, next) => {
   console.log('pre middleware start');
   console.log(c.group, c.name, c.method, c.path);
-  await next();
+  await next(c);
   console.log('pre middleware end');
 }, {pre : true});
 
 app.use(async (c, next) => {
     console.log('middleware 1');
-    await next();
+    await next(c);
     console.log('middleware 1 end');
 }, 'home');
 
 app.use(async (c, next) => {
     console.log('middleware 2');
     c.body.say = '你好';
-    await next();
+    await next(c);
     console.log('middleware 2 end');
 }, {group: 'test', method: 'POST'});
 
 app.use(async (c, next) => {
     console.log('middleware 3');
     if (c.query.say == 'hey') {
-        c.send('你好，test 接口 GET请求结束。');
+        c.to('你好，test 接口 GET请求结束。');
     } else {
-        await next();
+        await next(c);
     }
     console.log('middleware 3 end');
 }, {group: 'test', method : 'GET'});
@@ -50,30 +50,30 @@ app.use(async (c, next) => {
 app.use(async (c, next) => {
     console.log('set body size');
     c.maxBody = 24;
-    await next();
+    await next(c);
 }, {name: 'test-post', pre: true});
 
 app.use(async (c, next) => {
     console.log('middleware 4');
     c.body.x = 12;
-    await next();
+    await next(c);
     console.log('middleware 4 end');
 }, 'test-post');
 
 app.get('/', async c => {
-    c.send('ok');
+    c.to('ok');
 }, 'home');
 
 app.get('/test', async c => {
-    c.send(c.name);
+    c.to(c.name);
 }, {group: 'test', name : 'test'});
 
 app.post('/test', async c => {
-    c.send(c.body);
+    c.to(c.body);
 }, {group: 'test', name : 'test-post'});
 
 app.post('/transmit', async c => {
-    c.send('ok');
+    c.to('ok');
 }, 'transmit');
 
 app.use(async (c, next) => {
@@ -88,7 +88,7 @@ app.use(async (c, next) => {
         }
     };
 
-    await next();
+    await next(c);
 
     console.log(total, 'bytes');
 

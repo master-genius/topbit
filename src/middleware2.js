@@ -53,8 +53,7 @@ class Middleware extends MidCore {
   /** 这是最终添加的请求中间件。基于洋葱模型，这个中间件最先执行，所以最后会返回响应结果。 */
   addFinal() {
     let fr = async (ctx, next) => {
-      
-      await next();
+      await next(ctx);
 
       if(!ctx.stream || ctx.stream.closed || ctx.stream.destroyed || !ctx.stream.writable) {
         return ;

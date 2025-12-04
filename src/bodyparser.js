@@ -412,7 +412,7 @@ class Bodyparser {
         }
       }
 
-      await next();
+      await next(ctx);
     };
   }
 }

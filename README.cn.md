@@ -1,51 +1,33 @@
-![](images/titbit.png)
+![](images/topbit.png)
 
-# titbit
+# Topbit
 
 [English Documentation](README.en.md)
 
-> titbit是运行于服务端的Web框架，最开始是为了在教学中方便开发而设计，也用在一些业务系统上。它绝对算不上重型框架，但是也不简单过头。
-
-> **关于类型和TypeScript的支持**
-> 如果关于ECMAScript对类型系统的提案能够通过，则以后可以直接在JavaScript中使用类型，而无需考虑支持TS。
-> 如果后续此提案没有通过，再考虑支持。
-
-> 参考连接：<a href="https://github.com/tc39/proposal-type-annotations" target=_blank>JS的类型提案</a>
-
-> 有bug或是疑惑请提交issue或者发送私信。
-
-> 它非常快，无论是路由查找还是中间件执行过程。
-
-
-**Wiki中有相关主题的说明：[Wiki](https://gitee.com/daoio/titbit/wikis)**
-
-
-Node.js的Web开发框架，同时支持HTTP/1.1和HTTP/2协议， 提供了强大的中间件机制。
+topbit是基于Node.js的运行于服务端的Web框架，它没有任何第三方依赖，在独特的路由和中间件分组执行机制上进行了极致优化。
 
 
 **核心功能：**
 
 * 请求上下文设计屏蔽接口差异。
 
-* 中间件模式。
+* 全局中间件模式。
 
-* 路由分组和命名。
+* 路由分组和路由命名。
 
 * 中间件按照路由分组执行。中间件匹配请求方法和路由来执行。
 
-* 开启守护进程：使用cluster模块。
+* 开启守护进程，支持多进程集群以及worker进程自动化负载调整。
 
 * 显示子进程负载情况。
 
 * 默认解析body数据。
 
-* 支持通过配置启用HTTP/1.1或是HTTP/2服务。兼容模式，允许同时支持HTTP/2和HTTP/1.1。
+* 支持通过配置启用HTTP/1.1或是HTTP/2服务。允许同时支持HTTP/2和HTTP/1.1。
 
 * 支持配置启用HTTPS服务（HTTP/2服务必须要开启HTTPS）。
 
-* 限制请求数量。
-
-* 限制一段时间内单个IP的最大访问次数。
+* 限制请求数量。限制一段时间内单个IP的最大访问次数。
 
 * IP黑名单和IP白名单。
 
@@ -53,42 +35,20 @@ Node.js的Web开发框架，同时支持HTTP/1.1和HTTP/2协议， 提供了强�
 
 * 可选择是否开启自动负载模式：根据负载创建新的子进程处理请求，并在空闲时恢复初始状态。
 
-* 可控制子进程最大内存占用，并在超出时自动重启，可控制必须重启的最大内存以及当超出某一个数值但只有连接数为0的时候才会重启的内存。
-
 * 默认设定和网络安全相关的配置，避免软件服务层面的DDOS攻击和其他网络安全问题。
 
-
-## !注意
-
-请尽可能使用最新版本。**titbit会先查找路由再进行请求上下文对象的创建，如果没有发现路由，则不会创建请求上下文对象。** 这是为了避免无意义的操作，也会有其他一些错误或恶意请求的检测处理，错误状态码涉及到404和400，因此若需要在这个过程中控制返回的错误信息，需要通过初始化选项中的notFound和badRequest进行设置即可，默认的它们只是一条简短的文本信息。(自己添加的路由内部处理需要返回404则自行控制。)
-
-## **v25.x版本变化**
-
-v25.0.0版本开始，对请求上下文和其他相关细节进行了更新，数据属性趋向于扁平化，去掉请求上下文的res对象，不再使用ctx.res.body作为收集最终返回数据的属性，直接使用ctx.data。
-
-使用ctx.send()函数设置最终返回的数据，代码具备兼容性，没有需要更改的地方，可以直接升级。
 
 ## 安装
 
 ```javascript
-npm i titbit
+npm i topbit
 ```
 
 同样可以通过yarn安装：
 
 ```javascript
-yarn add titbit
+yarn add topbit
 ```
-
-## 兼容性
-
-
-从v21.8.1版本之后，到目前为止一直保持兼容更新，所有代码无需考虑兼容性问题，可以无缝升级版本。若后续技术变革导致需要不兼容更新，会给出说明。请注意文档和Wiki。
-
-v21.8.1之前，大版本号的版本可以保证兼容性。
-
-
-<a href="https://gitee.com/daoio/titbit/wikis/%E7%89%88%E6%9C%AC%E6%94%B9%E8%BF%9B%E8%AF%B4%E6%98%8E?sort_id=3220595" target="_blank">·重要版本改进</a>
 
 
 ## 最小示例
@@ -96,9 +56,9 @@ v21.8.1之前，大版本号的版本可以保证兼容性。
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
@@ -106,7 +66,7 @@ app.run(1234)
 
 ```
 
-当不填加路由时，titbit默认添加一个路由：
+当不填加路由时，topbit默认添加一个路由：
 
 `/*`
 
@@ -118,15 +78,15 @@ app.run(1234)
 ``` JavaScript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 
 app.get('/', async ctx => {
-  ctx.send('success')
+  ctx.to('success')
 })
 
 //默认监听0.0.0.0，参数和原生接口listen一致。
@@ -134,23 +94,22 @@ app.run(1234)
 
 ```
 
-ctx.data是返回的响应数据，也可以使用ctx.send(data)
-> 其实ctx.send()内部就是设置ctx.data的值。
-**最好使用ctx.send()设置返回的数据，因为v25.0.0之前的版本使用的是ctx.res.body返回数据，使用send函数保证了兼容性。**
+ctx.data是返回的响应数据，也可以使用ctx.to(data)
+> 其实 ctx.to()内部就是设置ctx.data的值。**推荐使用 ctx.to()设置返回的数据。**
 
 ## 使用import导入
 
 在 `.mjs` 文件中，可以使用ES6的import进行导入：
 
 ```javascript
-import Titbit from 'titbit'
+import Topbit from 'topbit'
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 app.get('/', async ctx => {
-    ctx.send('success')
+    ctx.to('success')
 })
 
 app.run(1234)
@@ -172,27 +131,27 @@ GET POST PUT PATCH DELETE OPTIONS  TRACE HEAD
 
 'use strict'
 
-const Titbit = require('titibit')
+const Topbit = require('titibit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 app.get('/', async c => {
-  c.send('success')
+  c.to('success')
 })
 
 app.get('/p', async c => {
-  c.send(`${c.method} ${c.routepath}`)
+  c.to(`${c.method} ${c.routepath}`)
 })
 
 app.post('/', async c => {
   //返回上传的数据
-  c.send(c.body)
+  c.to(c.body)
 })
 
 app.put('/p', async c => {
-  c.send({
+  c.to({
     method : c.method,
     body : c.body,
     query : c.query
@@ -217,22 +176,22 @@ app.run(8080)
 ``` JavaScript
 'use strict';
 
-const titbit = require('titbit');
+const Topbit = require('topbit');
 
-let app = new titbit({
+let app = new Topbit({
     debug: true
 })
 
 app.get('/q', async c => {
   //URL中?后面的查询字符串解析到query中。
   //返回JSON文本，主要区别在于header中content-type为text/json
-  c.send(c.query)
+  c.to(c.query)
 })
 
 app.post('/p', async c => {
   //POST、PUT提交的数据保存到body，如果是表单则会自动解析，否则只是保存原始文本值，
   //可以使用中间件处理各种数据。
-  c.send(c.body)
+  c.to(c.body)
 })
 
 app.run(2019)
@@ -254,14 +213,14 @@ app.run(2019)
 ``` JavaScript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-let app = new titbit({debug: true})
+let app = new Topbit({debug: true})
 
 app.post('/p', async c => {
   //POST、PUT提交的数据保存到body，如果是表单则会自动解析为object，
   //可以使用中间件处理各种数据。
-  c.send(c.body)
+  c.to(c.body)
 });
 
 app.run(2019)
@@ -296,20 +255,20 @@ app.run(2019)
 
 body解析模块本质上是一个中间件，这样设计的目的就是为了方便扩展和替换。
 
-## send函数返回数据
+## to函数返回数据
 
-send函数就是对c.data的包装，其实就是设置了c.data的值。并且支持第二个参数，作为状态码，默认为0，表示采用模块自身的默认状态码，Node.js中http和http2默认状态码为200。
+to函数就是对c.data的包装，其实就是设置了c.data的值。另外还有两个别名的函数：ok、oo。根据场景可以自由选择。
 
 ``` JavaScript
 
 app.get('/', async c => {
-  c.send('success')
+  c.to('success')
 })
 
 app.get('/randerr', async c => {
   let n = parseInt(Math.random() * 10)
   if (n >= 5) {
-    c.send('success')
+    c.ok('success')
   } else {
     //返回404状态码
     /*
@@ -317,7 +276,7 @@ app.get('/randerr', async c => {
         c.status(404).data = 'not found'
     */
    //你可以在v22.4.6以上的版本使用链式调用。
-    c.status(404).send('not found')
+    c.status(404).oo('not found')
   }
 })
 
@@ -327,7 +286,7 @@ app.run(1234)
 
 ## 链式调用
 
-在v22.4.6版本开始，可以对setHeader、status、sendHeader使用链式调用。
+可以对setHeader、status、sendHeader使用链式调用。
 
 ```javascript
 
@@ -336,12 +295,11 @@ app.get('/', async c => {
   c.setHeader('content-type', 'text/plain; charset=utf-8')
     .setHeader('x-server', 'nodejs server')
     .status(200)
-    .send(`${Date.now()} Math.random()}`)
+    .to(`${Date.now()} Math.random()}`)
 
 })
 
 ```
-
 
 ## 路由参数
 
@@ -350,7 +308,7 @@ app.get('/:name/:id', async c => {
   //使用:表示路由参数，请求参数被解析到c.param
   let username = c.param.name;
   let uid = c.param.id;
-  c.send(`${username} ${id}`)
+  c.to(`${username} ${id}`)
 })
 
 app.run(8000)
@@ -366,7 +324,7 @@ app.get('/static/*', async c => {
   //*表示的任意路径解析到c.param.starPath
   let spath = c.param.starPath
 
-  c.send(spath)
+  c.to(spath)
 })
 
 ```
@@ -377,7 +335,7 @@ app.get('/static/*', async c => {
 
 ----
 
-从v23.5.9开始，优化了路由查找过程。主要是对带参数路由和带 * 的路由进行了严格的顺序控制，而不是按照添加顺序进行匹配。
+路由查找过程，主要是对带参数路由和带 * 的路由进行了严格的顺序控制，而不是按照添加顺序进行匹配。
 
 采用之前的版本开发的应用仍然不受影响，不存在兼容性问题。更严格的顺序减少了冲突的可能。
 
@@ -409,13 +367,13 @@ app.get('/static/*', async c => {
 
 你可以使用app.middleware指定中间件并使用返回的group方法添加分组路由，或者直接使用app.group分组添加路由。
 
-**Titbit.prototype.middleware(mids, options=null)**
+**topbit.prototype.middleware(mids, options=null)**
 
 - mids是一个数组，每个元素是一个中间件函数或一个数组，数组的第一个元素是中间件，第二个是添加中间件的选项。
 
 - options默认为null，传递一个object为针对所有mids的选项，比如{pre: true}
 
-**Titbit.prototype.group(group_name, callback, prefix=true)**
+**topbit.prototype.group(group_name, callback, prefix=true)**
 
 - group_name 是一个字符串，表示路由分组的名称，如果是合法的路径，也作为路由的前缀。
 
@@ -427,16 +385,16 @@ app.get('/static/*', async c => {
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 //中间件函数
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
@@ -444,11 +402,11 @@ let mid_timing = async (c, next) => {
 // /api同时会添加到路由的前缀。
 app.group('/api', route => {
   route.get('/test', async c => {
-    c.send('api test')
+    c.to('api test')
   })
 
   route.get('/:name', async c => {
-    c.send(c.param)
+    c.to(c.param)
   })
 })
 
@@ -456,11 +414,11 @@ app.group('/api', route => {
 app.use(
   async (c, next) => {
     console.log(c.method, c.headers)
-    await next()
+    await next(c)
   }, {group: '/sub'}
 ).group('/sub', route => {
   route.get('/:id', async c => {
-    c.send(c.param.id)
+    c.to(c.param.id)
   })
 })
 
@@ -468,7 +426,7 @@ app.use(
 app.group('测试', route => {
   route.get('/test', async c => {
     console.log(c.group, c.name)
-    c.send('test ok')
+    c.to('test ok')
   }, 'test')
 })
 
@@ -483,24 +441,24 @@ app.run(1234)
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 //导入ToFile扩展
-const {ToFile} = require('titbit-toolkit')
+const {ToFile} = require('topbit-toolkit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 //中间件函数
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
 let sub_mid_test = async (c, next) => {
   console.log('mid test start')
-  await next()
+  await next(c)
   console.log('mid test end')
 }
 
@@ -516,18 +474,18 @@ app.middleware([
   ])
   .group('/api', route => {
       route.get('/test', async c => {
-        c.send('api test')
+        c.to('api test')
       })
 
       route.get('/:name', async c => {
-        c.send(c.param)
+        c.to(c.param)
       })
 
       //子分组 /sub启用中间件sub_mid_test，同时，子分组会启用上一层的所有中间件。
       route.middleware([sub_mid_test])
         .group('/sub', sub => {
             sub.get('/:key', async c => {
-              c.send(c.param)
+              c.to(c.param)
             })
         })
   })
@@ -538,35 +496,35 @@ app.run(1234)
 
 分组支持嵌套调用，但是层级不能超过9。通常超过3层的嵌套分组就是有问题的，需要重新设计。
 
-**这个功能，不如titbit-loader扩展的自动加载机制方便易用，但是在实际情况中。有各种各样的需求。并且有时候不得不利用单文件做服务，同时还要能够兼顾框架本身的路由和中间件分组的优势，还要能够方便的编写逻辑明确，结构清晰的代码，因此middleware、group的接口功能可以方便处理，并且若不习惯titbit-loader的MCM模式(Middleware - Controller - Model，类似MVC的模式)，使用这个方式也可以很好的组合其他模块代码。**
+**这个功能，不如TopbitLoader扩展的自动加载机制方便易用，但是在实际情况中。有各种各样的需求。并且有时候不得不利用单文件做服务，同时还要能够兼顾框架本身的路由和中间件分组的优势，还要能够方便的编写逻辑明确，结构清晰的代码，因此middleware、group的接口功能可以方便处理，并且若不习惯TopbitLoader的MCM模式(Middleware - Controller - Model，类似MVC的模式)，使用这个方式也可以很好的组合其他模块代码。**
 
-以上路由指派分组的功能是非侵入式的，它不会影响已有代码，也不会和titbit-loader冲突。
+以上路由指派分组的功能是非侵入式的，它不会影响已有代码，也不会和TopbitLoader冲突。
 
 **!! 复杂的路由处理函数应该放在单独的模块中，使用一个统一的自动化加载函数来完成。**
 
-在 v24.0.9 开始，支持使用返回值进行添加，也可以不必传递回调函数：
+支持使用返回值进行添加，也可以不必传递回调函数：
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 //导入ToFile扩展
-const {ToFile} = require('titbit-toolkit')
+const {ToFile} = require('topbit-toolkit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 //中间件函数
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
 let sub_mid_test = async (c, next) => {
   console.log('mid test start')
-  await next()
+  await next(c)
   console.log('mid test end')
 }
 
@@ -580,18 +538,18 @@ let route = app.middleware([
               .group('/api')
 
 route.get('/test', async c => {
-  c.send('api test')
+  c.to('api test')
 })
 
 route.get('/:name', async c => {
-  c.send(c.param)
+  c.to(c.param)
 })
 
 //子分组 /sub启用中间件sub_mid_test，同时，子分组会启用上一层的所有中间件。
 route.middleware([sub_mid_test])
   .group('/sub', sub => {
       sub.get('/:key', async c => {
-        c.send(c.param)
+        c.to(c.param)
       })
   })
 
@@ -609,9 +567,9 @@ app.run(1234)
 ``` JavaScript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit()
+const app = new Topbit()
 
 app.post('/upload', async c => {
   
@@ -625,9 +583,9 @@ app.post('/upload', async c => {
   let fname = c.ext.makeName(f.filename)
 
   try {
-    c.send(await c.moveFile(f, fname))
+    c.to(await c.moveFile(f, fname))
   } catch (err) {
-    c.status(500).send(err.message)
+    c.status(500).to(err.message)
   }
   
 }, 'upload-image'); //给路由命名为upload-image，可以在c.name中获取。
@@ -687,9 +645,9 @@ c.getFile就是通过名称索引，默认索引值是0，如果是一个小于0
 ```javascript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit({
+const app = new Topbit({
   //允许POST或PUT请求提交的数据量最大值为将近20M。
   //单位为字节。
   maxBody: 20000000
@@ -721,7 +679,7 @@ app.run(1234)
 */
 app.add(async (c, next) => {
     console.log('before');
-    await next();
+    await next(c);
     console.log('after');
 }, {method: 'POST', group: '/api'});
 
@@ -735,7 +693,7 @@ app.add(async (c, next) => {
 //先执行
 app.use(async (c, next) => {
   let start_time = Date.now()
-  await next()
+  await next(c)
   let end_time = Date.now()
   console.log(end_time - start_time)
 })
@@ -743,18 +701,18 @@ app.use(async (c, next) => {
 //后执行
 app.use(async (c, next) => {
   console.log(c.method, c.path)
-  await next()
+  await next(c)
 })
 
 //use可以级联: app.use(m1).use(m2)
 //在21.5.4版本以后，不过这个功能其实根本不重要
-//因为有titbit-loader扩展，实现的功能要强大的多。
+//因为有topbit-loader扩展，实现的功能要强大的多。
 
 ```
 
-## titbit完整的流程图示
+## topbit完整的流程图示
 
-![](images/titbit-middleware.png)
+![](images/topbit-middleware.png)
 
 
 > **需要知道的是，其实在内部，body数据接收和解析也都是中间件，只是刻意安排了顺序，分出了pre和use接口。**
@@ -797,7 +755,7 @@ app.use(proxy, {
 let setbodysize = async (c, next) => {
     //设定body最大接收数据为~10k。
     c.maxBody = 10000;
-    await next();
+    await next(c);
 };
 
 //等效于app.pre(setbodysize);
@@ -805,7 +763,7 @@ app.use(setbodysize, {pre: true});
 
 ```
 
-使用pre可以进行更复杂的处理，并且可以拦截并不执行下一层，比如titbit-toolkit扩展的proxy模块利用这个特性直接实现了高性能的代理服务，但是仅仅作为框架的一个中间件。其主要操作就是在这一层，直接设置了request的data事件来接收数据，并作其他处理，之后直接返回。
+使用pre可以进行更复杂的处理，并且可以拦截并不执行下一层，比如topbit-toolkit扩展的proxy模块利用这个特性直接实现了高性能的代理服务，但是仅仅作为框架的一个中间件。其主要操作就是在这一层，直接设置了request的data事件来接收数据，并作其他处理，之后直接返回。
 
 **根据不同的请求类型动态限制请求体大小**
 
@@ -813,7 +771,7 @@ app.use(setbodysize, {pre: true});
 
 ```javascript
 
-const app = new titbit({
+const app = new Topbit({
   //默认最大请求体 ~10M 限制。
   maxBody: 10000000
 })
@@ -833,7 +791,7 @@ app.pre(async (c, next) => {
     c.maxBody = 10000
   }
 
-  await next()
+  await next(c)
 
 }, {method: ['POST', 'PUT']})
 
@@ -842,7 +800,7 @@ app.pre(async (c, next) => {
 
 这些参数若同时出现在文件里会显得很复杂，维护也不方便，但是功能很强，所以若要交给程序自动完成则可以大大简化编码的工作。
 
-**完整的项目结构搭建，请配合使用titbit-loader，此扩展完成了路由、模型的自动加载和中间件自动编排。<a target=_blank href="https://gitee.com/daoio/titbit-loader">titbit-loader</a>**
+**完整的项目结构搭建，请配合使用topbit-loader，此扩展完成了路由、模型的自动加载和中间件自动编排。<a target=_blank href="https://gitee.com/daoio/topbit-loader">topbit-loader</a>**
 
 
 ## HTTPS
@@ -850,10 +808,10 @@ app.pre(async (c, next) => {
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
 //只需要传递证书和密钥文件所在路径
-const app = new Titbit({
+const app = new Topbit({
     // './xxx.pem'文件也可以
     cert: './xxx.cert',
     key: './xxx.key'
@@ -870,10 +828,10 @@ app.run(1234)
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
 //只需要传递证书和密钥文件所在路径
-const app = new Titbit({
+const app = new Topbit({
     cert: './xxx.cert',
     key: './xxx.key',
     //启用http2并允许http1，会自动启用兼容模式
@@ -1067,13 +1025,13 @@ app.run(1234)
 | isUpload() | 是否为上传文件请求，此时就是检测消息头content-type是否为multipart/form-data格式。 |
 | name | 路由名称，默认为空字符串。 |
 | group | 路由分组，默认为空字符串。 |
-| reply | HTTP/1.1协议，指向response，HTTP/2 指向stream。 |
-| request | HTTP/1.1 就是http模块request事件的参数IncomingMessage对象，HTTP/2 指向stream对象。 |
+| res | HTTP/1.1协议，指向response，HTTP/2 指向stream。 |
+| req | HTTP/1.1 就是http模块request事件的参数IncomingMessage对象，HTTP/2 指向stream对象。 |
 | box | 默认为空对象，可以添加任何属性值，用来动态传递给下一层组件需要使用的信息。 |
 | service | 用于依赖注入的对象，指向app.service。 |
-| data | 保存最后要返回到客户端的数据，给data赋值即可，或者直接使用ctx.send函数。在v24.x版本以前，是ctx\.res\.body。 |
+| data | 保存最后要返回到客户端的数据，给data赋值即可，或者直接使用ctx.to函数。在v24.x版本以前，是ctx\.res\.body。 |
 | ext | 提供了一些助手函数，具体参考wiki。 |
-| send(data) | 函数，用来设置ctx.data的数据。 |
+| to(data) | 函数，用来设置ctx.data的数据。 |
 | write(data) | 直接写入数据到客户端。 |
 | moveFile(file:object, target_filepath:string) | 函数，用来移动上传的文件到指定路径。 |
 | status() | 函数，设置状态码。 |
@@ -1090,7 +1048,7 @@ app.run(1234)
 | pipeText(filepath) | 以text类型流式响应文件数据。 |
 | pipeHtml(filepath) | 以html类型流式响应文件数据。 |
 
-注意：send函数只是设置ctx.data属性的值，在最后才会返回数据。和直接进行ctx.data赋值没有区别，只是因为函数调用如果出错会更快发现问题，而设置属性值写错了就是添加了一个新的属性，不会报错但是请求不会返回正确的数据。
+注意：to函数只是设置ctx.data属性的值，在最后才会返回数据。和直接进行ctx.data赋值没有区别，只是因为函数调用如果出错会更快发现问题，而设置属性值写错了就是添加了一个新的属性，不会报错但是请求不会返回正确的数据。
 
 ## 依赖注入
 
@@ -1100,9 +1058,9 @@ app.run(1234)
 
 'use strict';
 
-const titbit = require('titbit');
+const Topbit = require('topbit');
 
-var app = new titbit({
+let app = new Topbit({
   debug: true
 });
 
@@ -1117,7 +1075,7 @@ app.addService('data', {
 这可能看不出什么作用，毕竟在一个文件中，直接访问变量都可以，如果要做模块分离，就变得非常重要了。
 */
 app.get('/info', async c => {
-  c.send({
+  c.to({
     name : c.service.name,
     data : c.service.data
   })
@@ -1135,8 +1093,8 @@ app.run(1234)
 
 ```javascript
 'use strict'
-const titbit = require('titbit')
-const app = new titbit({
+const Topbit = require('topbit')
+const app = new Topbit({
     debug: true
 })
 
@@ -1156,7 +1114,7 @@ app.run(1234)
 
 ## app.isMaster和app.isWorker
 
-Node.js在v16.x版本开始，cluster模块推荐使用isPrimary代替isMaster，不过isMaster仍然是可用的，在titbit初始化app实例之后，app上有两个getter属性：isMaster和isWorker。作用和cluster上的属性一致，其目的在于：
+Node.js在v16.x版本开始，cluster模块推荐使用isPrimary代替isMaster，不过isMaster仍然是可用的，在topbit初始化app实例之后，app上有两个getter属性：isMaster和isWorker。作用和cluster上的属性一致，其目的在于：
 
 - 在代码中不必再次编写const cluster = require('cluster')。
 
@@ -1203,9 +1161,9 @@ app.daemon(1234, 'localhost', 3)
 
 ``` JavaScript
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit({
+const app = new Topbit({
   debug: true,
   //全局日志开启
   globalLog: true,
@@ -1214,10 +1172,10 @@ const app = new titbit({
   logType: 'file'
 
   //返回状态码为2xx或者3xx
-  logFile : '/tmp/titbit.log',
+  logFile : '/tmp/topbit.log',
 
   //错误的日志输出文件，返回状态码4xx或者5xx
-  errorLogFile: '/tmp/titbit-error.log',
+  errorLogFile: '/tmp/topbit-error.log',
 
   //自定义处理函数，此时logFile和errorLogFile会失效。
   //接收参数为(worker, message)
@@ -1254,10 +1212,10 @@ app.daemon(1234, 3)
 
 ``` JavaScript
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 const cluster = require('cluster')
 
-const app = new titbit({
+const app = new Topbit({
   debug: true,
   loadInfoFile: '/tmp/loadinfo.log'
 })
@@ -1265,7 +1223,7 @@ const app = new titbit({
 if (cluster.isMaster) {
   app.setMsgEvent('test-msg', (worker, msg, handle) => {
     //子进程中会通过message事件收到消息
-    worker.send({
+    worker.to({
       id : worker.id,
       data : 'ok'
     })
@@ -1273,13 +1231,13 @@ if (cluster.isMaster) {
     console.log(msg)
   })
 } else {
-  //接收worker.send发送的消息
+  //接收worker.to发送的消息
   process.on('message', msg => {
     console.log(msg)
   })
 
   setIneterval(() => {
-    process.send({
+    process.to({
       type : 'test-msg',
       pid : process.pid,
       time : (new Date()).toLocaleString()
@@ -1292,15 +1250,15 @@ if (cluster.isMaster) {
 
 比较麻烦的地方在于，worker进程发送消息比较复杂，在22.4.0版本开始，提供了一个send方法用于快速发送消息。只有在worker进程中才会发送给master进程，所以不必额外进行worker进程检测。
 
-## app.send 和 app.workerMsg
+## app.to 和 app.workerMsg
 
 现在让我们来改写上面代码的worker进程发送消息的部分：
 
 ```javascript
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit({
+const app = new Topbit({
   debug: true,
   loadInfoFile: '/tmp/loadinfo.log'
 })
@@ -1308,7 +1266,7 @@ const app = new titbit({
 //master进程注册消息事件类型，worker进程不会执行。
 app.setMsgEvent('test-msg', (worker, msg, handle) => {
   //子进程中会通过message事件收到消息
-  worker.send({
+  worker.to({
     id : worker.id,
     data : 'ok'
   })
@@ -1325,7 +1283,7 @@ cluster.isWorker
     &&
 setInterval(() => {
   //只有worker会执行。
-  app.send('test-msg', {
+  app.to('test-msg', {
     pid: process.pid,
     time: (new Date).toLocaleString()
   })
@@ -1375,14 +1333,14 @@ app.daemon(1234, 2)
 ```javascript
 'use strict';
 
-const titbit = require('titbit');
+const Topbit = require('topbit');
 
 setTimeout(() => {
   //在定时器的循环里抛出异常
   throw new Error(`test error`)
 }, 2000);
 
-const app = new titbit({
+const app = new Topbit({
     //调试模式，输出错误信息。
     debug: true,
     //开启strong模式
@@ -1404,7 +1362,7 @@ app.run(1234);
 ```javascript
 
 //核心代码示例
-const app = new titbit({
+const app = new Topbit({
     //调试模式，输出错误信息。
     debug: true,
     //开启strong模式
@@ -1435,16 +1393,16 @@ const app = new titbit({
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 const http = require('node:http')
 const https = require('https')
 
-const app = new Titbit({
+const app = new Topbit({
     //启用调试
     debug: true,
 })
 
-//以下都是http/1.1的服务，若要同时支持http2，需要启用http2服务并兼容http1，若有需要请使用titbit-httpc扩展。
+//以下都是http/1.1的服务，若要同时支持http2，需要启用http2服务并兼容http1，若有需要请使用topbit-httpc扩展。
 
 //这种情况下，你需要自己设定相关事件的监听处理。
 
@@ -1460,14 +1418,14 @@ https_server.listen(2026)
 
 ## 请求限流
 
-框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用titbit-toolkit扩展的http2limit模块。
+框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用topbit-toolkit扩展的http2limit模块。
 
 ```javascript
 'use strict';
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
     debug : true,
     //启用请求限制
     useLimit: true,
@@ -1501,7 +1459,7 @@ const app = new Titbit({
 
 
 app.get('/', async ctx => {
-  ctx.send('ok')
+  ctx.to('ok')
 })
 
 //使用3个worker进程处理请求，每个都支持单位时间内请求6次
@@ -1512,7 +1470,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 ## 其他
 
-- titbit在运行后，会有一个最后包装的中间件做最终的处理，所以设置c.data的值就会返回数据，默认会检测一些简单的文本类型并自动设定content-type（text/plain,text/html,application/json）。注意这是在你没有设置content-type的情况下进行。
+- topbit在运行后，会有一个最后包装的中间件做最终的处理，所以设置c.data的值就会返回数据，默认会检测一些简单的文本类型并自动设定content-type（text/plain,text/html,application/json）。注意这是在你没有设置content-type的情况下进行。
 
 - 默认会限制url的最大长度，也会根据硬件情况设定一个最大内存使用率。
 
@@ -1529,9 +1487,9 @@ app.daemon(1234, '0.0.0.0', 3)
 ```
 'use strict'
 
-const Titbit = require('titbit');
+const Topbit = require('topbit');
 
-let app = new Titbit();
+let app = new Topbit();
 
 /*
  以下操作可以通过选项memFactor控制，请参考上文的配置选项部分。
@@ -1549,7 +1507,7 @@ app.secure.diemem = 900_000_000;
 app.secure.maxrss = 800_000_000;
 
 app.get('/', async c => {
-  c.send('ok');
+  c.to('ok');
 })
 
 app.daemon(8008, 2);
@@ -1559,4 +1517,3 @@ app.daemon(8008, 2);
 **注意，这需要你开启loadMonitor选项，这是默认开启的，除非你设置为false**
 
 在服务始化时，会根据系统的可用内存来进行自动的设置，除非你必须要自己控制，否则最好是使用默认的配置。
-
