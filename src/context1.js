@@ -100,7 +100,7 @@ class Context {
   }
 
   setHeader(name, val) {
-    this.response.setHeader(name, val)
+    this.res.setHeader(name, val)
     return this
   }
 

@@ -445,7 +445,7 @@ class Proxy {
 
       let urlobj = self.copyUrlobj(pr.urlobj)
 
-      urlobj.path = c.request.url
+      urlobj.path = c.req.url
       urlobj.headers = c.headers
       urlobj.method = c.method
 
@@ -462,7 +462,7 @@ class Proxy {
       }
 
       if (pr.rewrite) {
-        let rw = pr.rewrite(c, c.request.url)
+        let rw = pr.rewrite(c, c.req.url)
         
         if (rw) {
           let path_typ = typeof rw
