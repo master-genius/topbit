@@ -47,7 +47,7 @@ let _topbit_home_page = `<!DOCTYPE html><html>
       <br>
       <p>功能强大、简洁高效的Web开发框架。</p>
       <p>文档 & 仓库：
-        <a style="text-decoration:none;color:#345689;" href="https://gitee.com/daoio/topbit" target=_blank>
+        <a style="text-decoration:none;color:#345689;" href="https://github.com/master-genius/topbit" target=_blank>
           topbit</a></p>
     </div>
   </div>
