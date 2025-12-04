@@ -131,13 +131,13 @@ class SSE {
     }
 
     return new Promise((rv, rj) => {
-      ctx.reply.on('error', err => {
+      ctx.res.on('error', err => {
         clearInterval(self.timer)
         self.timer = null
         rj(err)
       })
 
-      ctx.reply.on('close', () => {
+      ctx.res.on('close', () => {
         clearInterval(self.timer)
         self.timer = null
         rv('sse closed')
@@ -149,7 +149,7 @@ class SSE {
           if (self.retry > 0) {
             ctx.sendmsg({data: 'timeout', retry: self.retry})
           }
-          return ctx.reply.end()
+          return ctx.res.end()
         }
 
         try {
@@ -179,12 +179,12 @@ class SSE {
 
     ctx.box.sseNext = true
 
-    ctx.reply.on('error', err => {
+    ctx.res.on('error', err => {
       ctx.box.sseNext = false
       ctx.box.sseError = err
     })
 
-    ctx.reply.on('close', () => {
+    ctx.res.on('close', () => {
       ctx.box.sseNext = false
     })
 
@@ -268,19 +268,19 @@ class SSE {
       if (!ctx.sendmsg || typeof ctx.sendmsg !== 'function') {
         ctx.sendmsg = (msg, cb=undefined) => {
           let emsg = fmtMessage(msg)
-          if (emsg) return ctx.reply.write(emsg, cb)
+          if (emsg) return ctx.res.write(emsg, cb)
         }
       }
 
-      ctx.reply.setTimeout(self.timeout, () => {
-        if (ctx.reply.writable) ctx.reply.end()
+      ctx.res.setTimeout(self.timeout, () => {
+        if (ctx.res.writable) ctx.res.end()
       })
 
       //http2协议需要设置session超时，否则如果默认的服务超时设置比self.timeout短，会导致无法收到消息。
-      if (ctx.major == 2 && ctx.reply.session && ctx.reply.session.listenerCount) {
+      if (ctx.major == 2 && ctx.res.session && ctx.res.session.listenerCount) {
         //http2的session会保持连接，如果stream超时关闭后，session可能会维持连接，此时有可能会复用session。
-        if (ctx.reply.session.listenerCount('timeout') < 2) {
-          ctx.reply.session.setTimeout(self.timeout, () => {})
+        if (ctx.res.session.listenerCount('timeout') < 2) {
+          ctx.res.session.setTimeout(self.timeout, () => {})
         }
       }
 

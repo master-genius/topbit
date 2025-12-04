@@ -264,7 +264,7 @@ class Resource {
         }
       })
 
-      stm.pipe(ctx.reply)
+      stm.pipe(ctx.res)
     })
 
   }

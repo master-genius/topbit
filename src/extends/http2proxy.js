@@ -601,16 +601,16 @@ Http2Proxy.prototype.mid = function () {
         stm.on('response', (headers, flags) => {
           timeout_timer && clearTimeout(timeout_timer)
           timeout_timer = setTimeout(timeout_handler, pr.timeout + 5000)
-          if (c.reply && c.reply.writable) {
-            if (c.reply.respond) {
-              c.reply.respond(headers)
-            } else if (c.reply.setHeader) {
+          if (c.res && c.res.writable) {
+            if (c.res.respond) {
+              c.res.respond(headers)
+            } else if (c.res.setHeader) {
               c.status(headers[':status'])
 
               for (let k in headers) {
                 if (typeof k !== 'string' || k[0] === ':') continue
 
-                c.reply.setHeader(k, headers[k])
+                c.res.setHeader(k, headers[k])
               }
             }
           }
@@ -639,7 +639,7 @@ Http2Proxy.prototype.mid = function () {
         let data_count = 0
         stm.on('data', chunk => {
           data_count++
-          c.reply && c.reply.writable && c.reply.write(chunk)
+          c.res && c.res.writable && c.res.write(chunk)
 
           if (data_count >= 111) {
             data_count = 0
@@ -678,12 +678,12 @@ Http2Proxy.prototype.init = function (app) {
   app.config.timeout = this.timeout
 
   for (let p in this.pathTable) {
-    app.router.map(this.methods, p, async c => {}, '@titbit_h2_proxy');
+    app.router.map(this.methods, p, async c => {}, '@topbit_h2_proxy');
   }
 
   app.use(this.mid(), {
     pre: true,
-    group: `titbit_h2_proxy`
+    group: `topbit_h2_proxy`
   })
 
 }

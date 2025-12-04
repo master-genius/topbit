@@ -480,11 +480,11 @@ class Proxy {
         let resolved = false
         let rejected = false
 
-        c.request.on('timeout', () => {
+        c.req.on('timeout', () => {
           !h.destroyed && h.destroy(timeoutError)
         })
 
-        c.response.on('timeout', () => {
+        c.res.on('timeout', () => {
           !h.destroyed && h.destroy(timeoutError)
         })
 
@@ -507,11 +507,11 @@ class Proxy {
           }
     
           res.on('data', chunk => {
-            c.response.write(chunk)
+            c.res.write(chunk)
           })
       
           res.on('end', () => {
-            c.response.end()
+            c.res.end()
 
             if (!resolved && !rejected) {
               resolved = true
@@ -534,11 +534,11 @@ class Proxy {
           }
         })
     
-        c.request.on('data', chunk => {
+        c.req.on('data', chunk => {
           h.write(chunk)
         })
     
-        c.request.on('end', () => {
+        c.req.on('end', () => {
           h.end()
         })
     
