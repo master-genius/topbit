@@ -1,305 +1,294 @@
-![](images/titbit.png)
+![](images/topbit.png)
 
-# titbit
+# Topbit
 
-**titbit** is a server-side web framework initially designed to simplify development in educational settings, but it has also been used in some production systems. It is not a heavyweight framework, but it is far from overly simplistic.
+[中文文档](README.cn.md)
 
-> **About Type Systems and TypeScript Support**  
-> If the ECMAScript proposal for a type system is approved, JavaScript will natively support types in the future, eliminating the need to consider TypeScript support.  
-> If this proposal is not adopted, TypeScript support will be considered later.  
-
-> Reference link: <a href="https://github.com/tc39/proposal-type-annotations" target="_blank">JavaScript Type Annotations Proposal</a>
-
-> For bugs or questions, please submit an issue or send a private message.
-
-> It is extremely fast, both in route lookup and middleware execution.
-
-
-A Node.js web development framework that supports both HTTP/1.1 and HTTP/2 protocols, providing a robust middleware mechanism.
+Topbit is a server-side Web framework based on Node.js. It has no third-party dependencies and is optimized for extreme performance with a unique routing and middleware grouping execution mechanism.
 
 **Core Features:**
 
-* Request context design that abstracts interface differences.
-* Middleware pattern.
-* Route grouping and naming.
-* Middleware execution based on route groups, matching request methods and routes.
-* Support for running as a daemon using the `cluster` module.
-* Display of subprocess load information.
-* Automatic parsing of request body data.
-* Configurable support for HTTP/1.1 or HTTP/2 services, with a compatibility mode allowing simultaneous support for both.
-* Support for enabling HTTPS (required for HTTP/2 services).
-* Request rate limiting.
-* Limiting the maximum number of requests from a single IP within a time period.
-* IP blacklists and whitelists.
-* In cluster mode, automatic restart of subprocesses that exceed maximum memory limits.
-* Optional automatic load balancing: creates new subprocesses based on load and reverts to the initial state when idle.
-* Control over maximum memory usage for subprocesses, with automatic restarts when limits are exceeded or when memory usage surpasses a threshold and there are no active connections.
-* Default configurations for network security to mitigate DDoS attacks and other security issues at the software service layer.
-
-## !Note
-
-Always use the latest version whenever possible. **titbit performs route lookup before creating the request context object. If no route is found, the request context object is not created.** This avoids unnecessary operations and includes detection for some erroneous or malicious requests, with error status codes 404 and 400. To customize error messages during this process, use the `notFound` and `badRequest` initialization options, which by default return simple text messages. (For routes you define, handle 404 errors internally as needed.)
-
-## **v25.x Version Changes**
-
-Starting with v25.0.0, the request context and related details have been updated, flattening data attributes. The `res` object in the request context has been removed, and `ctx.res.body` is no longer used to collect response data; instead, `ctx.data` is used directly.
-
-Use the `ctx.send()` function to set the final response data. The code remains compatible, so no changes are required, and you can upgrade directly.
+*   **Request Context Design:** Shields interface differences.
+*   **Global Middleware Pattern.**
+*   **Route Grouping and Naming.**
+*   **Group-Based Middleware Execution:** Middleware is matched and executed based on request methods and route groups.
+*   **Daemon Mode:** Supports multi-process clustering and automated worker process load adjustment.
+*   **Load Monitoring:** Displays child process load status.
+*   **Body Parsing:** Parses body data by default.
+*   **HTTP/1.1 & HTTP/2:** Supports enabling HTTP/1.1 or HTTP/2 via configuration. Allows simultaneous support for HTTP/2 and HTTP/1.1.
+*   **HTTPS Support:** Supports HTTPS configuration (HTTP/2 service requires HTTPS).
+*   **Request Limiting:** Limits the maximum number of visits per single IP within a specific time period.
+*   **IP Blacklist and Whitelist.**
+*   **Memory Management:** In cluster mode, monitors child processes and restarts them if they exceed the maximum memory limit.
+*   **Auto-Scaling:** Optional automatic load mode: creates new child processes to handle requests based on load and restores the initial state when idle.
+*   **Security:** Default settings related to network security to avoid DDoS attacks and other network security issues at the software service level.
 
 ## Installation
 
 ```javascript
-npm i titbit
+npm i topbit
 ```
 
-You can also install it using Yarn:
+You can also install via yarn:
 
 ```javascript
-yarn add titbit
+yarn add topbit
 ```
-
-## Compatibility
-
-Since v21.8.1, updates have been kept compatible, allowing seamless version upgrades without compatibility concerns. If future technological changes require breaking updates, detailed explanations will be provided. Please review the documentation and Wiki.
-
-Before v21.8.1, major version numbers ensured compatibility.
-
-<a href="https://gitee.com/daoio/titbit/wikis/%E7%89%88%E6%9C%AC%E6%94%B9%E8%BF%9B%E8%AF%B4%E6%98%8E?sort_id=3220595" target="_blank">· Important Version Improvements</a>
 
 ## Minimal Example
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 app.run(1234)
 ```
 
-When no routes are added, titbit automatically adds a default route:
+When no routes are added, Topbit adds a default route:
 
 `/*`
 
-Visiting this in a browser displays a simple page, intended for initial exploration and documentation access. It has no impact on actual development.
+Visiting via a browser will show a very simple page. This is merely for initial understanding and documentation access; it will not affect actual development.
 
-## Adding a Route
+## Add a Route
 
-```javascript
+``` JavaScript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
+
 app.get('/', async ctx => {
-  ctx.send('success')
+  ctx.to('success')
 })
 
-// Listens on 0.0.0.0 by default; parameters are consistent with the native `listen` interface.
+// Defaults to listening on 0.0.0.0, parameters are consistent with the native listen interface.
 app.run(1234)
+
 ```
 
-`ctx.data` holds the response data, or you can use `ctx.send(data)`.  
-> Internally, `ctx.send()` sets the value of `ctx.data`.  
-**It’s recommended to use `ctx.send()` to set response data, as versions prior to v25.0.0 used `ctx.res.body` for responses, and `send` ensures compatibility.**
+`ctx.data` is the response data to be returned. You can also use `ctx.to(data)`.
+> Actually, `ctx.to()` internally sets the value of `ctx.data`. **Using `ctx.to()` to set return data is recommended.**
 
-## Using ES6 Imports
+## Using Import
 
-In `.mjs` files, you can use ES6 `import` syntax:
+In `.mjs` files, you can use ES6 import:
 
 ```javascript
-import Titbit from 'titbit'
+import Topbit from 'topbit'
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 app.get('/', async ctx => {
-  ctx.send('success')
+    ctx.to('success')
 })
 
 app.run(1234)
+
 ```
 
 ## Routes and Request Types
 
-HTTP request methods (also called request types) are specified in the HTTP start line. Supported request methods:
-
+The HTTP start line defines the request type, also known as the Request Method. Current request methods:
 ```
-GET POST PUT PATCH DELETE OPTIONS TRACE HEAD
+GET POST PUT PATCH DELETE OPTIONS  TRACE HEAD
 ```
 
-The most commonly used are the first six. For each request type, the router provides a corresponding lowercase function for mounting routes. For convenience, these methods are also available directly on the `app` instance after initialization. (The framework only supports these methods.)
+The first 6 are the most commonly used. For each request type, the router has a corresponding lowercase function for mounting routes. For convenience, after initializing the app, you can use the shortcut calls with the same names on the `app` instance. (The framework supports these types.)
 
 **Example:**
 
-```javascript
+``` JavaScript
+
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('titibit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 app.get('/', async c => {
-  c.send('success')
+  c.to('success')
 })
 
 app.get('/p', async c => {
-  c.send(`${c.method} ${c.routepath}`)
+  c.to(`${c.method} ${c.routepath}`)
 })
 
 app.post('/', async c => {
-  // Returns the submitted data
-  c.send(c.body)
+  // Return uploaded data
+  c.to(c.body)
 })
 
 app.put('/p', async c => {
-  c.send({
-    method: c.method,
-    body: c.body,
-    query: c.query
+  c.to({
+    method : c.method,
+    body : c.body,
+    query : c.query
   })
 })
 
-// Listens on 0.0.0.0 by default; parameters are consistent with the native `listen` interface.
+// Defaults to listening on 0.0.0.0
 app.run(8080)
+
 ```
 
-## Retrieving URL Parameters
+## Get URL Parameters
 
-- Query string parameters (e.g., `?a=1&b=2`) are parsed into `c.query`.
-- Form-submitted data is parsed into `c.body`.
+- Query strings in the URL (parameters like `?a=1&b=2`) are parsed into `c.query`.
+- Form submitted data is parsed into `c.body`.
 
-> Form submissions typically have a `content-type` of `application/x-www-form-urlencoded`.
+> The content-type for forms is `application/x-www-form-urlencoded`.
 
-```javascript
-'use strict'
+``` JavaScript
+'use strict';
 
-const titbit = require('titbit')
+const Topbit = require('topbit');
 
-let app = new titbit({
-  debug: true
+let app = new Topbit({
+    debug: true
 })
 
 app.get('/q', async c => {
-  // Query string parameters from the URL are parsed into `query`.
-  // Returns JSON text with `content-type` set to `text/json`.
-  c.send(c.query)
+  // Query strings after ? in URL are parsed into query.
+  // Returns JSON text, main difference is content-type in header is text/json
+  c.to(c.query)
 })
 
 app.post('/p', async c => {
-  // Data from POST or PUT requests is stored in `body`. For forms, it is automatically parsed; otherwise, it’s raw text.
+  // Data submitted via POST/PUT is saved to body. 
+  // If it's a form, it is automatically parsed; otherwise, raw text value is saved.
   // Middleware can be used to handle various data types.
-  c.send(c.body)
+  c.to(c.body)
 })
 
 app.run(2019)
+
 ```
 
-## Retrieving POST Data
+## Get POST Data
 
-POST and PUT requests submit data in the request body, typically from form submissions or asynchronous requests.
+Requests that submit body data are POST and PUT. In front-end pages, this is usually form submission or asynchronous requests.
 
-- Form-submitted data is parsed into `c.body`.
+- Form submitted data is parsed into `c.body`.
 
-> Forms have a `content-type` of `application/x-www-form-urlencoded`.  
-> Asynchronous requests often use `content-type: application/json`.
+> Form content-type is `application/x-www-form-urlencoded`.
 
-For both types, `c.body` is an object.
+> Asynchronous request data often has a content-type of `application/json`.
 
-```javascript
+For both types above, `c.body` will be an object.
+
+``` JavaScript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-let app = new titbit({ debug: true })
+let app = new Topbit({debug: true})
 
 app.post('/p', async c => {
-  // Data from POST or PUT requests is stored in `body`. For forms, it is automatically parsed into an object.
-  // Middleware can be used to handle various data types.
-  c.send(c.body)
-})
+  // POST/PUT data saved to body. Forms are auto-parsed to object.
+  // Middleware can be used to process various data.
+  c.to(c.body)
+});
 
 app.run(2019)
+
 ```
 
-## About `content-type`
+## About content-type
 
-**`application/x-www-form-urlencoded`**  
-Basic form data is parsed into `c.body` as a JavaScript object.
+**application/x-www-form-urlencoded**
 
-**`text/*`**  
-For `content-type` starting with `text/`, such as `text/json`, the framework does not parse the data. It converts the uploaded data to a UTF-8 encoded string and assigns it to `c.body`. Further processing is left to the developer.
+Basic form types are parsed into `c.body` as a JS object.
 
-**`multipart/form-data;boundary=xxx`**  
-For file uploads, the framework parses the data by default, and the parsed file objects are stored in `c.files`, accessible via `c.getFile`.
+**text/\***
 
-**`application/json`**  
-This type is parsed using `JSON.parse`.
+If content-type is `text/*` (starts with text/), such as `text/json`, the framework does not parse it. It simply converts the uploaded data to a string in utf8 format and assigns it to `c.body`. Subsequent processing is decided by the developer.
 
-**Other Types**  
-For other `content-type` values, `c.body` points to `c.rawBody`, which is the raw `Buffer` data.
+**multipart/form-data;boundary=xxx**
 
-The framework provides core support for basic types, leaving other types for developers to handle or extend. To disable default body parsing, set the `parseBody` initialization option to `false`. You can also extend body parsing as needed.
+If content-type is a file upload type, it is parsed by default. The parsed file objects are placed in `c.files`, accessible via `c.getFile`.
 
-The body parsing module is essentially a middleware, designed to facilitate extensions and replacements.
+**application/json**
 
-## The `send` Function
+This type will be parsed using `JSON.parse`.
 
-The `send` function is a wrapper for setting `c.data`. It supports an optional second parameter for the status code (default is 0, which uses the module’s default status code, 200 in Node.js HTTP and HTTP/2).
+**Other types**
 
-```javascript
+If content-type is any other type, `c.body` defaults to point to `c.rawBody`, which is the rawest Buffer data.
+
+The framework provides basic core support. Other types need to be handled by the developer or via extensions.
+
+To be easy to use while leaving enough space for developers, you can completely discard the default body parsing by setting the initialization option `parseBody` to `false`. You can also extend upon this.
+
+The body parsing module is essentially a middleware designed to facilitate extension and replacement.
+
+## to Function Returning Data
+
+The `to` function is a wrapper for `c.data`; it sets the value of `c.data`. There are two aliases: `ok` and `oo`. You can choose freely based on the scenario.
+
+``` JavaScript
+
 app.get('/', async c => {
-  c.send('success')
+  c.to('success')
 })
 
 app.get('/randerr', async c => {
   let n = parseInt(Math.random() * 10)
   if (n >= 5) {
-    c.send('success')
+    c.ok('success')
   } else {
-    // Returns 404 status code
+    // Return 404 status code
     /*
       Equivalent to:
         c.status(404).data = 'not found'
     */
-    // Chainable calls are supported in v22.4.6 and above.
-    c.status(404).send('not found')
+   // You can use chain calls in versions above v22.4.6.
+    c.status(404).oo('not found')
   }
 })
 
 app.run(1234)
+
 ```
 
-## Chainable Calls
+## Chain Calls
 
-Starting with v22.4.6, `setHeader`, `status`, and `sendHeader` support chainable calls.
+You can use chain calls for `setHeader`, `status`, and `sendHeader`.
 
 ```javascript
+
 app.get('/', async c => {
+
   c.setHeader('content-type', 'text/plain; charset=utf-8')
     .setHeader('x-server', 'nodejs server')
     .status(200)
-    .send(`${Date.now()} Math.random()`)
+    .to(`${Date.now()} Math.random()}`)
+
 })
+
 ```
 
 ## Route Parameters
 
-```javascript
+``` JavaScript
 app.get('/:name/:id', async c => {
-  // Route parameters (denoted by `:`) are parsed into `c.param`.
-  let username = c.param.name
-  let uid = c.param.id
-  c.send(`${username} ${uid}`)
+  // Use : to indicate route parameters, request params are parsed into c.param
+  let username = c.param.name;
+  let uid = c.param.id;
+  c.to(`${username} ${id}`)
 })
 
 app.run(8000)
@@ -307,273 +296,313 @@ app.run(8000)
 
 ## Wildcard Path Parameters
 
-The `*` wildcard indicates any path but must appear at the end of the route.
+`*` represents any path, but it must appear at the end of the route.
 
-```javascript
+``` JavaScript
+
 app.get('/static/*', async c => {
-  // The wildcard path is parsed into `c.param.starPath`.
+  // Any path represented by * is parsed into c.param.starPath
   let spath = c.param.starPath
-  c.send(spath)
+
+  c.to(spath)
 })
+
 ```
+
+----
 
 ## Route Lookup Rules
 
-Since v23.5.9, the route lookup process has been optimized, particularly for routes with parameters and wildcards, enforcing stricter order control instead of matching based on the order routes were added.
+----
 
-This change does not affect applications developed with earlier versions, ensuring compatibility. The stricter order reduces the likelihood of conflicts.
+The route lookup process strictly controls the order of parameterized routes and routes with `*`, rather than matching based on addition order.
 
-**Route Lookup Strategy:**
+Applications developed with previous versions are unaffected; there are no compatibility issues. Stricter ordering reduces the likelihood of conflicts.
 
-1. Exact string paths.
-2. Routes with parameters (fewer parameters match first).
-3. Wildcard (`*`) routes, matched from longest to shortest.
+Route Lookup Strategy:
+
+1.  Ordinary string paths.
+2.  Parameterized routes (routes with fewer parameters match first).
+3.  Routes with `*` (matched in longest-to-shortest pattern).
 
 ```
 Example:
-Routes: /x/y/:id  /x/y/*  /x/*  /x/:key/:id
+Existing routes: /x/y/:id  /x/y/* /x/*  /x/:key/:id
 
-/x/y/123 matches /x/y/:id and stops.
-/x/y/123/345 matches /x/y/* and stops.
-/x/q/123 matches /x/:key/:id.
-/x/a.jpg matches /x/*, as no other routes match.
-/x/static/images/a.jpg matches /x/*, as no other routes match.
+/x/y/123 matches /x/y/:id first, stops matching.
+
+/x/y/123/345 matches /x/y/* first, stops matching.
+
+/x/q/123 will match /x/:key/:id.
+
+/x/a.jpg will match /x/*, other routes cannot match.
+
+/x/static/images/a.jpg will match /x/*, other routes cannot match.
 ```
 
-## Route Grouping
+----
 
-You can use `app.middleware` to specify middleware and use the returned `group` method to add grouped routes, or directly use `app.group` to add grouped routes.
+## Grouping Routes
 
-**`Titbit.prototype.middleware(mids, options=null)`**
+You can use `app.middleware` to specify middleware and use the returned `group` method to add grouped routes, or use `app.group` directly.
 
-- `mids`: An array where each element is a middleware function or an array containing a middleware function and its options.
-- `options`: Defaults to `null`. Pass an object to apply options to all middleware, e.g., `{pre: true}`.
+**topbit.prototype.middleware(mids, options=null)**
 
-**`Titbit.prototype.group(group_name, callback, prefix=true)`**
+- `mids` is an array. Each element is a middleware function or an array where the first element is the middleware and the second is the options for adding that middleware.
+- `options` defaults to `null`. Pass an object for options applying to all `mids`, e.g., `{pre: true}`.
 
-- `group_name`: A string representing the group name. If it’s a valid path, it also serves as a route prefix.
-- `callback`: A callback function that receives a parameter for adding middleware or routes using `get`, `post`, etc.
-- `prefix`: A boolean (default `true`) controlling whether `group_name` is used as a route prefix (only if it’s a valid route string).
+**topbit.prototype.group(group_name, callback, prefix=true)**
+
+- `group_name` is a string representing the route group name. If it is a valid path, it also serves as the route prefix.
+- `callback` is a callback function. The parameters received by the callback can still call `middleware` and `group`, as well as `get`, `post`, etc., to add routes.
+- `prefix` is a boolean, defaults to `true`. It controls whether `group_name` is added as a route prefix. However, it only acts as a prefix if `group_name` is a valid route string.
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 // Middleware function
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
-// The group return value supports `use` and `pre` for adding middleware.
-// `/api` is also added as a route prefix.
+// The return value of group can use 'use' and 'pre' to add middleware.
+// /api is also added to the route prefix.
 app.group('/api', route => {
   route.get('/test', async c => {
-    c.send('api test')
+    c.to('api test')
   })
 
   route.get('/:name', async c => {
-    c.send(c.param)
+    c.to(c.param)
   })
 })
 
-// Add middleware to a specific group
+// Add middleware to the corresponding group
 app.use(
   async (c, next) => {
     console.log(c.method, c.headers)
-    await next()
-  }, { group: '/sub' }
+    await next(c)
+  }, {group: '/sub'}
 ).group('/sub', route => {
   route.get('/:id', async c => {
-    c.send(c.param.id)
+    c.to(c.param.id)
   })
 })
 
-// Test group name (not a valid route, so it won’t be a prefix)
-app.group('test', route => {
+// Test: Does not conform to route rules, so it won't be a path prefix.
+app.group('Test', route => {
   route.get('/test', async c => {
     console.log(c.group, c.name)
-    c.send('test ok')
+    c.to('test ok')
   }, 'test')
 })
 
 app.run(1234)
+
 ```
 
-This approach can be complex when specifying multiple middleware. The `middleware` method simplifies this, as shown below.
+Specifying multiple middlewares in this way can be somewhat complex; you can use the `middleware` method. See the example below.
 
 ### Assigning Middleware to Groups and Subgroups
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
-const { ToFile } = require('titbit-toolkit')
+const Topbit = require('topbit')
+// Import ToFile extension
+const {ToFile} = require('topbit-toolkit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 // Middleware function
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
 let sub_mid_test = async (c, next) => {
   console.log('mid test start')
-  await next()
+  await next(c)
   console.log('mid test end')
 }
 
-// The group return value supports `use`, `pre`, and `middleware` for adding middleware.
-// `/api` is added as a route prefix.
+// group return value can use use, pre, middleware to add middleware.
+// /api is also added to the route prefix.
+
 app.middleware([
-  // Timing middleware runs before receiving request body data, so `pre` is set to `true`.
-  [mid_timing, { pre: true }],
-  // ToFile extension runs after receiving request body data, only for POST and PUT.
-  [new ToFile(), { method: ['POST', 'PUT'] }]
-]).group('/api', route => {
-  route.get('/test', async c => {
-    c.send('api test')
-  })
+     // Time recording middleware, runs before receiving body data, so set pre: true
+     [ mid_timing, {pre: true} ],
 
-  route.get('/:name', async c => {
-    c.send(c.param)
-  })
+     // ToFile extension runs after receiving body data, only for POST and PUT requests
+     [ new ToFile(), {method: ['POST', 'PUT']} ]
+  ])
+  .group('/api', route => {
+      route.get('/test', async c => {
+        c.to('api test')
+      })
 
-  // Subgroup `/sub` enables `sub_mid_test` middleware and inherits parent middleware.
-  route.middleware([sub_mid_test]).group('/sub', sub => {
-    sub.get('/:key', async c => {
-      c.send(c.param)
-    })
+      route.get('/:name', async c => {
+        c.to(c.param)
+      })
+
+      // Subgroup /sub enables middleware sub_mid_test.
+      // Simultaneously, subgroups inherit all middleware from the upper layer.
+      route.middleware([sub_mid_test])
+        .group('/sub', sub => {
+            sub.get('/:key', async c => {
+              c.to(c.param)
+            })
+        })
   })
-})
 
 app.run(1234)
+
 ```
 
-Group nesting is supported but should not exceed 9 levels. Nesting beyond 3 levels is often a sign of poor design and should be reconsidered.
+Groups support nested calls, but the hierarchy cannot exceed 9 levels. Usually, nesting more than 3 levels indicates a design issue and should be reconsidered.
 
-**This feature is non-intrusive and does not affect existing code or conflict with `titbit-loader`.**
+**This feature is not as convenient and easy to use as the automatic loading mechanism of the `TopbitLoader` extension. However, in practice, requirements vary. Sometimes you have to use a single file for the service while still taking advantage of the framework's routing and middleware grouping, and also conveniently writing logic-clear, structured code. Therefore, `middleware` and `group` interfaces are convenient for handling this. Also, if you are not used to TopbitLoader's MCM pattern (Middleware - Controller - Model, similar to MVC), this method combines well with other module code.**
 
-**Complex route handlers should be placed in separate modules and loaded using a unified automation function.**
+The function of assigning routing groups above is non-intrusive; it will not affect existing code, nor will it conflict with TopbitLoader.
 
-Starting with v24.0.9, you can add routes using return values without passing a callback function:
+**!! Complex route handling functions should be placed in separate modules and completed using a unified automated loading function.**
+
+It supports adding via return values, so passing a callback function is not mandatory:
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
-const { ToFile } = require('titbit-toolkit')
+const Topbit = require('topbit')
+// Import ToFile extension
+const {ToFile} = require('topbit-toolkit')
 
-const app = new Titbit({
+const app = new Topbit({
   debug: true
 })
 
 // Middleware function
 let mid_timing = async (c, next) => {
   console.time('request')
-  await next()
+  await next(c)
   console.timeEnd('request')
 }
 
 let sub_mid_test = async (c, next) => {
   console.log('mid test start')
-  await next()
+  await next(c)
   console.log('mid test end')
 }
 
 let route = app.middleware([
-  // Timing middleware runs before receiving request body data, so `pre` is set to `true`.
-  [mid_timing, { pre: true }],
-  // ToFile extension runs after receiving request body data, only for POST and PUT.
-  [new ToFile(), { method: ['POST', 'PUT'] }]
-]).group('/api')
+                // Time recording middleware, pre set to true
+                [ mid_timing, {pre: true} ],
+
+                // ToFile extension runs after receiving body data, only for POST and PUT
+                [ new ToFile(), {method: ['POST', 'PUT']} ]
+              ])
+              .group('/api')
 
 route.get('/test', async c => {
-  c.send('api test')
+  c.to('api test')
 })
 
 route.get('/:name', async c => {
-  c.send(c.param)
+  c.to(c.param)
 })
 
-// Subgroup `/sub` enables `sub_mid_test` middleware and inherits parent middleware.
-route.middleware([sub_mid_test]).group('/sub', sub => {
-  sub.get('/:key', async c => {
-    c.send(c.param)
+// Subgroup /sub enables middleware sub_mid_test.
+// Subgroup inherits upper layer middleware.
+route.middleware([sub_mid_test])
+  .group('/sub', sub => {
+      sub.get('/:key', async c => {
+        c.to(c.param)
+      })
   })
-})
 
 app.run(1234)
+
 ```
 
-## File Uploads
+----
 
-File uploads are parsed by default. You can disable this by setting the `parseBody` option during initialization. Parsed file data is stored in `c.files`, with the structure detailed below.
+## Uploading Files
 
-```javascript
+Uploaded files are parsed by default. You can turn this off by passing the `parseBody` option when initializing the service (detailed in options below).
+Parsed file data is stored in `c.files`. The specific structure is shown later.
+
+``` JavaScript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit()
+const app = new Topbit()
 
 app.post('/upload', async c => {
+  
   let f = c.getFile('image')
 
-  // Helper function to generate a unique filename based on timestamp and file extension.
+  // Helper functions: makeName generates a name based on timestamp by default,
+  // extName parses the file extension.
+  // let fname = `${c.ext.makeName()}${c.ext.extName(f.filename)}`
+
+  // Generate a unique filename based on original extension + timestamp + random number.
   let fname = c.ext.makeName(f.filename)
 
   try {
-    c.send(await c.moveFile(f, fname))
+    c.to(await c.moveFile(f, fname))
   } catch (err) {
-    c.status(500).send(err.message)
+    c.status(500).to(err.message)
   }
-}, 'upload-image') // Names the route `upload-image`, accessible via `c.name`.
+  
+}, 'upload-image'); // Name the route 'upload-image', accessible in c.name.
 
 app.run(1234)
+
 ```
 
-## `c.files` Data Structure
+## c.files Data Structure
 
-The structure is designed based on the HTTP protocol’s file upload data format. Since HTTP allows multiple files under the same upload name, files are parsed into an array. `c.getFile` returns the first file by default, as most cases involve a single file per upload name.
+This structure is designed based on the data construction of HTTP protocol file uploads. HTTP protocol allows multiple files for the same upload name, so it parses into an array. Using `getFile` returns the first file by default, as usually, one upload name corresponds to one file.
 
-> For front-end developers, the upload name is the `name` attribute in the HTML form: `<input type="file" name="image">`.  
-> Do not confuse the upload name with the filename.
+> For the front-end, the upload name is the name attribute in the HTML form: `<input type="file" name="image">`.
+> `image` is the upload name; do not confuse upload name with filename.
 
 ```javascript
 {
-  image: [
+  image : [
     {
       'content-type': CONTENT_TYPE,
-      // Available since v23.2.6, alias for content-type
+      // Available since 23.2.6, alias for content-type for easier access
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
-      start: START,
-      end: END,
+      start : START,
+      end   : END,
       length: LENGTH,
       rawHeader: HEADER_DATA,
       headers: {...}
     },
     ...
   ],
-  video: [
+
+  video : [
     {
       'content-type': CONTENT_TYPE,
-      // Available since v23.2.6, alias for content-type
+      // Available since 23.2.6, alias for content-type
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
-      start: START,
-      end: END,
+      start : START,
+      end   : END,
       length: LENGTH,
       rawHeader: HEADER_DATA,
       headers: {...}
@@ -583,690 +612,872 @@ The structure is designed based on the HTTP protocol’s file upload data format
 }
 ```
 
-`c.getFile(name)` retrieves file information by name, defaulting to index 0. If a negative index is provided, it returns the entire file array; if no files are found, it returns `null`.
+`c.getFile` indexes by name. The default index value is 0. If a number less than 0 is passed, it gets the entire file array; returns null if not found.
 
-## Body Size Limit
+## Max Body Data Limit
 
 ```javascript
 'use strict'
 
-const titbit = require('titbit')
+const Topbit = require('topbit')
 
-const app = new titbit({
-  // Sets the maximum data size for POST or PUT requests to ~20MB (in bytes).
+const app = new Topbit({
+  // Allows POST or PUT request data max value to be approx 20MB.
+  // Unit is bytes.
   maxBody: 20000000
 })
 
+//...
+
 app.run(1234)
+
 ```
 
 ## Middleware
 
-Middleware is a powerful pattern, with implementations varying slightly across languages but sharing the same essence. Middleware allows developers to organize code effectively and handle complex logic. The framework’s entire operation is based on the middleware pattern.
+Middleware is a very useful pattern. Implementation varies slightly between languages, but the essence is the same. The middleware mechanism allows developers to organize code better and implement complex logic easily. In fact, the entire framework runs on a middleware pattern.
 
-**Middleware Diagram:**
+Middleware Diagram:
 
 ![](images/middleware.jpg)
 
-The framework’s middleware is designed to execute based on route groups and request types, ensuring fast performance. Middleware is executed only when needed, avoiding unnecessary operations. Example:
+This framework's middleware is designed to distinguish by route groups and recognize different request types to determine whether to execute or skip to the next layer. This makes it extremely fast. Multiple routes and groups have their own middleware, do not conflict, and avoid meaningless calls. Reference format:
 
-```javascript
+``` JavaScript
+
 /*
-  The second parameter is optional, indicating global middleware.
-  Here, it specifies that the middleware only applies to POST requests in the `/api` group.
-  This design ensures efficient execution without unnecessary operations.
+  The second parameter is optional; omitting it enables the middleware globally.
+  Here, the second parameter indicates: execute only for POST requests AND the route group must be /api.
+  This design ensures execution on demand, avoiding unnecessary operations.
 */
 app.add(async (c, next) => {
-  console.log('before')
-  await next()
-  console.log('after')
-}, { method: 'POST', group: '/api' })
+    console.log('before');
+    await next(c);
+    console.log('after');
+}, {method: 'POST', group: '/api'});
+
 ```
 
-Middleware added with `add` executes in reverse order of addition (standard onion model). To align with developer intuition, the `use` interface adds middleware that executes in the order it was added. Different frameworks handle execution order differently, but sequential execution is more intuitive.
+Middleware added with `add` executes in reverse order of addition (LIFO), which is the standard onion model. To provide logic that is easier to understand, the `use` interface is provided. Middleware added with `use` executes in the order of addition (FIFO). Different frameworks have different logic for order implementation, but sequential execution suits developer habits better.
 
-**Recommendation: Use `use` to add middleware.**
+**It is recommended to use `use` to add middleware:**
 
-```javascript
+``` JavaScript
 // Executes first
 app.use(async (c, next) => {
   let start_time = Date.now()
-  await next()
+  await next(c)
   let end_time = Date.now()
   console.log(end_time - start_time)
 })
 
-// Executes second
+// Executes later
 app.use(async (c, next) => {
   console.log(c.method, c.path)
-  await next()
+  await next(c)
 })
 
-// `use` supports chaining: app.use(m1).use(m2)
-// Available since v21.5.4, though this is less critical with `titbit-loader`.
+// use can be cascaded: app.use(m1).use(m2)
+// Available after v21.5.4, but this feature is not critical
+// because the topbit-loader extension offers much more powerful functionality.
 ```
 
-## titbit Complete Flow Diagram
+## Topbit Complete Flow Chart
 
-![](images/titbit-middleware.png)
+![](images/topbit-middleware.png)
 
-> **Note: Internally, body data reception and parsing are also middleware, deliberately ordered and separated into `pre` and `use` interfaces.**
+> **It is important to know that internally, body data reception and parsing are also middleware. The order is deliberately arranged, separating `pre` and `use` interfaces.**
 
 ## Middleware Parameters
 
-The `use` and `pre` interfaces support a second parameter for precise control:
+Using `use` or `pre` interfaces to add middleware supports a second parameter for precise control via option properties:
 
-- `group`: Specifies the route group for the middleware.
-- `method`: Request method(s) as a string or array (must be uppercase).
-- `name`: Route name, restricting middleware to specific routes.
+*   `group`: Route group. Indicates which group to execute for.
+*   `method`: Request method. String or Array, must be uppercase.
+*   `name`: Request name. Indicates execution only for this request name.
 
 Example:
 
 ```javascript
+
 app.get('/xyz', async c => {
-  // Route grouped under 'proxy'
-}, { group: 'proxy' })
+  //...
+  // Route group named proxy
+}, {group: 'proxy'})
 
 app.use(proxy, {
-  method: ['PUT', 'POST', 'GET', 'DELETE', 'OPTIONS'],
-  group: 'proxy'
+  method : ['PUT', 'POST', 'GET', 'DELETE', 'OPTIONS'],
+  // Execute for requests in route group 'proxy'.
+  group : 'proxy'
 })
 ```
 
-## `pre` Middleware (Before Body Parsing)
+## pre (Before Receiving Body Data)
 
-The main difference between `pre` and `use` is that `pre` middleware executes before receiving body data, useful for permission filtering. Its parameters are the same as `use`.
+The main difference between middleware added via the `pre` interface and `use` is that `pre` executes before receiving body data. It can be used for permission filtering operations before receiving data. Its parameters are consistent with `use`.
 
-For a consistent experience, you can use `use` with the `pre` option:
+For a consistent development experience, you can use the `use` interface and simply specify `pre` in the options:
 
 ```javascript
 let setbodysize = async (c, next) => {
-  // Sets max body size to ~10KB.
-  c.maxBody = 10000
-  await next()
-}
+    // Set max body receive data to ~10k.
+    c.maxBody = 10000;
+    await next(c);
+};
 
-// Equivalent to app.pre(setbodysize)
-app.use(setbodysize, { pre: true })
+// Equivalent to app.pre(setbodysize);
+app.use(setbodysize, {pre: true});
+
 ```
 
-`pre` middleware can handle complex logic and intercept requests without proceeding to the next layer. For example, the `titbit-toolkit` proxy module uses this to implement a high-performance proxy as a middleware.
+Using `pre` allows for more complex processing, including intercepting and not executing the next layer. For example, the `proxy` module in the `topbit-toolkit` extension uses this feature to implement a high-performance proxy service directly as a framework middleware. Its main operation is to set the request's `data` event to receive data at this layer, handle other logic, and return directly.
 
-**Dynamic Body Size Limits by Request Type**
+**Dynamically limiting request body size based on different request types**
 
-This can be achieved using `pre` middleware:
+This requirement can be solved by adding middleware via `pre`:
 
 ```javascript
-const app = new titbit({
-  // Default max body size ~10MB
+
+const app = new Topbit({
+  // Default max body limit ~10M.
   maxBody: 10000000
 })
 
 app.pre(async (c, next) => {
+
   let ctype = c.headers['content-type'] || ''
 
   if (ctype.indexOf('text/') === 0) {
-    // 50KB
+    // 50K
     c.maxBody = 50000
   } else if (ctype.indexOf('application/') === 0) {
-    // 100KB
+    // 100K
     c.maxBody = 100000
   } else if (ctype.indexOf('multipart/form-data') < 0) {
-    // 10KB
+    // 10K
     c.maxBody = 10000
   }
 
-  await next()
-}, { method: ['POST', 'PUT'] })
+  await next(c)
+
+}, {method: ['POST', 'PUT']})
+
+
 ```
 
-These parameters can make the code complex and hard to maintain, but they are powerful. For automation, use `titbit-loader`, which simplifies routing, model loading, and middleware orchestration: <a target="_blank" href="https://gitee.com/daoio/titbit-loader">titbit-loader</a>.
+If these parameters appear in the file simultaneously, it can look complex and be hard to maintain, but the functionality is powerful. Therefore, leaving it to automated program completion can greatly simplify coding.
+
+**For complete project structure setup, please use `topbit-loader`. This extension completes automatic loading of routes/models and automatic orchestration of middleware. <a target=_blank href="https://gitee.com/daoio/topbit-loader">topbit-loader</a>**
 
 ## HTTPS
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-// Specify paths to the certificate and key files
-const app = new Titbit({
-  cert: './xxx.cert',
-  key: './xxx.key'
+// Just pass the path to the certificate and key files
+const app = new Topbit({
+    // './xxx.pem' file also works
+    cert: './xxx.cert',
+    key: './xxx.key'
 })
 
 app.run(1234)
+
 ```
 
-## Supporting HTTP/2 and HTTP/1.1 (Compatibility Mode)
+## Simultaneous Support for HTTP/2 and HTTP/1.1 (Compatibility Mode)
 
-Compatibility mode uses the ALPN protocol and requires HTTPS, so certificate and key files must be configured.
+Compatibility mode utilizes the ALPN protocol and requires HTTPS, so certificates and keys must be configured.
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 
-// Specify paths to the certificate and key files
-const app = new Titbit({
-  cert: './xxx.cert',
-  key: './xxx.key',
-  // Enable HTTP/2 and allow HTTP/1.1 compatibility
-  http2: true,
-  allowHTTP1: true
+// Just pass the path to the certificate and key files
+const app = new Topbit({
+    cert: './xxx.cert',
+    key: './xxx.key',
+    // Enable http2 and allow http1; compatibility mode is enabled automatically
+    http2: true,
+    allowHTTP1: true
 })
 
 app.run(1234)
+
 ```
 
 ## Configuration Options
 
-Complete configuration options for application initialization, with detailed comments:
+Full configuration options for app initialization are as follows. Please read the comments carefully.
 
-```javascript
-{
-  // Maximum byte size for POST/PUT form submissions and file uploads.
-  maxBody: 8000000,
+``` JavaScript
+  {
+    // This config represents max bytes for POST/PUT form submission and file uploads.
+    maxBody   : 8000000,
 
-  // Maximum number of files to parse.
-  maxFiles: 12,
+    // Max number of files to parse
+    maxFiles      : 12,
 
-  daemon: false, // Enable daemon mode.
+    daemon        : false, // Enable daemon mode
 
-  // If set to a non-empty string in daemon mode, writes the PID to this file for service management.
-  pidFile: '',
+    /*
+      After enabling daemon mode, if path is not empty string, pid is written to this file. Used for service management.
+    */
+    pidFile       : '',
 
-  // Enable global logging to output or save request information.
-  globalLog: false,
+    // Whether to enable global logging. true enables it, outputting request info or writing to file.
+    globalLog: false,
 
-  // Log output method: 'stdio' for terminal, 'file' for file.
-  logType: 'stdio',
+    // Log output type: 'stdio' for terminal, 'file' for file output.
+    logType : 'stdio',
 
-  // File path for successful request logs (2xx or 3xx status codes).
-  logFile: '',
+    // File path for successful request logs
+    logFile : '',
 
-  // File path for error request logs (4xx or 5xx status codes).
-  errorLogFile: '',
+    // File path for error request logs
+    errorLogFile : '',
 
-  // Maximum number of log entries per file.
-  logMaxLines: 50000,
+    // Max lines per log file
+    logMaxLines: 50000,
 
-  // Maximum number of historical log files.
-  logHistory: 50,
+    // Max number of historical log files
+    logHistory: 50,
 
-  // Custom log handling function.
-  logHandle: null,
+    // Custom log handler function
+    logHandle: null,
 
-  // Enable HTTPS.
-  https: false,
+    // Enable HTTPS
+    https       : false,
 
-  http2: false,
+    http2   : false,
 
-  allowHTTP1: false,
+    allowHTTP1: false,
 
-  // File paths for HTTPS key and certificate. Setting these enables `https: true`.
-  key: '',
-  cert: '',
+    // HTTPS key and cert file paths. If paths are set, https is automatically set to true.
+    key   : '',
+    cert  : '',
 
-  // Server options passed to `http2.createSecureServer` or `tls.createServer`.
-  server: {
-    handshakeTimeout: 8192, // TLS handshake timeout
-    // sessionTimeout: 350,
-  },
+    // Server options written in 'server', passed during http service initialization. Reference http2.createSecureServer, tls.createServer
+    server : {
+      handshakeTimeout: 8192, // TLS handshake timeout
+      //sessionTimeout: 350,
+    },
 
-  // Server timeout (milliseconds). Can be overridden per request.
-  timeout: 15000,
+    // Set server timeout in ms. Specific request timeouts can be set in specific requests.
+    timeout   : 15000,
 
-  debug: false,
+    debug     : false,
 
-  // Ignore trailing slashes in paths.
-  ignoreSlash: true,
+    // Ignore trailing / in paths
+    ignoreSlash: true,
 
-  // Enable request limiting.
-  useLimit: false,
+    // Enable request limiting
+    useLimit: false,
 
-  // Maximum connections (0 for unlimited).
-  maxConn: 1024,
+    // Max connections, 0 means no limit
+    maxConn : 1024,
 
-  // Maximum requests per IP within a time period (0 for unlimited).
-  maxIPRequest: 0,
+    // Max connections per single IP within unit time, 0 means no limit
+    maxIPRequest: 0,
 
-  // Time period for request limiting (default: 60 second).
-  unitTime: 60,
+    // Rate limit unit time for IP, 1 means 1 second. Default 60 seconds. Range 0.1 ~ 86400.
+    unitTime : 60,
+    
+    // Display load info, requires enabling cluster mode via daemon interface
+    loadMonitor : true,
 
-  // Display load information (requires `daemon` mode).
-  loadMonitor: true,
+    // Load info type: text, json, --null
+    // json type is for program communication, convenient for interface development
+    loadInfoType : 'text',
 
-  // Load information type: 'text', 'json', or '--null'. JSON is for programmatic use.
-  loadInfoType: 'text',
+    // Load info file path. If not set, outputs to terminal; otherwise saves to file.
+    loadInfoFile : '',
 
-  // File path for load information (if unset, outputs to terminal).
-  loadInfoFile: '',
+    // Data to return for 404
+    notFound: 'Not Found',
+    
+    // Data to return for 400
+    badRequest : 'Bad Request',
 
-  // Data for 404 responses.
-  notFound: 'Not Found',
+    // Percentage parameter controlling max memory usage for child processes. Range -0.42 ~ 0.36. Base is 0.52, so default is 80%.
+    memFactor: 0.28,
 
-  // Data for 400 responses.
-  badRequest: 'Bad Request',
+    // Max URL length
+    maxUrlLength: 2048,
 
-  // Memory usage percentage factor for subprocesses (-0.42 to 0.36; base is 0.52, default is 80%).
-  memFactor: 0.28,
+    // Max number of request context cache pool.
+    maxpool: 4096,
 
-  // Maximum URL length.
-  maxUrlLength: 2048,
+    // Timer milliseconds for child process resource reporting.
+    monitorTimeSlice: 640,
 
-  // Maximum request context cache pool size.
-  maxpool: 4096,
+    // When globalLog is true, record real IP address? Mainly used in reverse proxy mode.
+    realIP: false,
 
-  // Interval (milliseconds) for subprocess resource reporting.
-  monitorTimeSlice: 640,
+    // Max allowed querystring parameters.
+    maxQuery: 25,
 
-  // Log real IP addresses in global logs (useful in reverse proxy mode).
-  realIP: false,
+    // Enable strong mode? If enabled, processes rejectionHandled and uncaughtException events,
+    // and captures errors: TypeError,ReferenceError,RangeError,AssertionError,URIError,Error.
+    strong: false,
 
-  // Maximum number of query string parameters.
-  maxQuery: 25,
+    // Fast querystring parsing. Multiple values with same name only set the first one, not parsed as array.
+    fastParseQuery: false,
+    
+    // Whether to auto decode Query parameters using decodeURIComponent.
+    autoDecodeQuery: true,
 
-  // Enable strong mode to handle `rejectionHandled` and `uncaughtException` events,
-  // capturing errors like TypeError, ReferenceError, etc.
-  strong: false,
+    // In multipart format, limit max length of a single form item.
+    maxFormLength: 1000000,
 
-  // Fast query string parsing (uses only the first value for duplicate keys, not an array).
-  fastParseQuery: false,
+    /* Error handler function. Unifies collection of runtime errors:
+          tlsClientError, server error, secureConnection error, clientError, thrown runtime errors.
+      errname is a string marking error info and location, format --ERR-CONNECTION--, --ERR-CLIENT--, etc.
 
-  // Automatically decode query parameters using `decodeURIComponent`.
-  autoDecodeQuery: true,
+      Usually Node.js thrown errors have code and message. 
+      errname is optional but passed.
+      Pass custom function via config option to implement custom error collection/handling.
+    */
+    errorHandle: (err, errname) => {
+      this.config.debug && console.error(errname, err)
+    },
 
-  // Maximum length for a single form item in multipart format.
-  maxFormLength: 1000000,
+    // Max load rate percentage. Default 75 means if CPU usage > 75%, automatically create child process.
+    // Must enable auto load mode via autoWorker.
+    maxLoadRate: 75,
 
-  // Error handling function for runtime errors (e.g., tlsClientError, server errors).
-  // `errname` is a string like `--ERR-CONNECTION--` or `--ERR-CLIENT--`.
-  errorHandle: (err, errname) => {
-    this.config.debug && console.error(errname, err)
-  },
+    // http2 protocol http2Stream timeout. If not set, -1 means consistent with timeout.
+    streamTimeout: -1,
 
-  // Maximum CPU load percentage (default: 75%). Effective only with `autoWorker`.
-  maxLoadRate: 75,
+    // Request timeout. This is total request time, mainly to counter malicious requests.
+    // e.g. Slowloris attacks where 1 byte is sent per second.
+    // Idle timeout won't work, allowing long-term resource occupation.
+    // This is a DDoS attack.
+    requestTimeout: 100000,
 
-  // HTTP/2 stream timeout (-1 to match `timeout`).
-  streamTimeout: -1,
+  };
+  // For HTTP status codes, only these two are needed here. Others don't strictly need full support, 
+  // and you can handle them in your application implementation.
+  // Because once execution starts, corresponding status codes can be returned via runtime state.
+  // Before that, the framework prepares for the onion model execution, which is very fast.
 
-  // Total request timeout to counter malicious requests (e.g., DDoS attacks).
-  requestTimeout: 100000
-}
 ```
 
 ## Request Context
 
-The request context is an object encapsulating various request data, abstracting differences between HTTP/1.1 and HTTP/2 and handling Node.js version incompatibilities. For HTTP/2, the request object is a `stream`, not `IncomingMessage` and `ServerResponse` as in HTTP/1.1.
+Request context is an object encapsulating various request data. This design handles differences between HTTP/1.1 and HTTP/2 protocols and incompatibilities from Node.js evolution. For design and performance, the HTTP2 module encapsulates the request object as a stream, not the `http` module's `IncomingMessage` and `ServerResponse`.
 
-**Request Context Properties and Descriptions**
+**Request Context Properties and Description**
 
 | Property | Description |
-|----------|-------------|
-| version | Protocol version (`'1.1'` or `'2'`). |
-| major | Major protocol version (1, 2, or 3 for HTTP/1.1, HTTP/2, HTTP/3; 3 not yet supported). |
-| maxBody | Maximum request body size (bytes), defaults to `maxBody` from initialization, adjustable in middleware. |
-| method | Request method (e.g., `GET`, `POST`), uppercase string. |
-| host | Hostname from `request.headers.host`. |
-| protocol | Protocol string (`http` or `https`, no colon). |
-| path | Requested path. |
-| routepath | Actual route string executed. |
-| query | URL query parameters. |
+| ---- | ---- |
+| version | Protocol version, string type, '1.1' or '2'. |
+| major | Major protocol version number, 1, 2, 3 (HTTP/1.1, HTTP/2, HTTP/3). |
+| maxBody | Max supported request body bytes. Number. Defaults to `maxBody` init option. Can be set automatically in middleware based on request. |
+| method | Request type (GET, POST, etc.). Uppercase string. |
+| host | Service hostname, value of `request.headers.host`. |
+| protocol | Protocol string without colon, 'https', 'http'. |
+| path | Specific request path. |
+| routepath | Actual executed route string. |
+| query | URL passed parameters. |
 | param | Route parameters. |
 | files | Uploaded file information. |
-| body | Request body data (string, object, or Buffer, depending on `content-type`). |
-| port | Client request port. |
-| ip | Client IP address (socket address; check `x-real-ip` or `x-forwarded-for` for proxies). |
-| headers | Reference to `request.headers`. |
-| isUpload() | Checks if the request is a file upload (`multipart/form-data`). |
-| name | Route name (default: empty string). |
-| group | Route group (default: empty string). |
-| reply | HTTP/1.1: `response`; HTTP/2: `stream`. |
-| request | HTTP/1.1: `IncomingMessage`; HTTP/2: `stream`. |
-| box | Empty object for dynamically passing data to subsequent layers. |
-| service | Dependency injection object, points to `app.service`. |
-| data | Final response data (set directly or via `ctx.send`). Before v24.x, was `ctx.res.body`. |
-| ext | Helper functions (see Wiki). |
-| send(data) | Sets `ctx.data`. |
-| write(data) | Writes data directly to the client. |
-| moveFile(file, target_filepath) | Moves an uploaded file to the specified path. |
-| status() | Sets the status code. |
-| setHeader(k, v) | Sets a response header. |
-| removeHeader(k) | Removes a pending response header. |
-| getFile(name) | Retrieves uploaded file information from `files`. |
-| sendHeader() | Sends headers (HTTP/2 only; no-op for HTTP/1.1). |
-| user | Standard property for user login (default: `null`). |
-| json(data) | Sets response data with `content-type: application/json`. |
-| text(data) | Sets response data with `content-type: text/plain`. |
-| html(data) | Sets response data with `content-type: text/html`. |
-| pipe(filepath) | Streams file data (e.g., `await ctx.setHeader('content-type', 'text/html').pipe('./index.html')`). |
-| pipeJson(filepath) | Streams file data as JSON. |
-| pipeText(filepath) | Streams file data as text. |
-| pipeHtml(filepath) | Streams file data as HTML. |
+| body | Body request data. Format depends on content-type (string, object, buffer). |
+| port | Client request port number. |
+| ip | Client request IP address (socket address). Check x-real-ip or x-forwarded-for if using proxy. |
+| headers | Points to `request.headers`. |
+| isUpload() | Is it a file upload request? Checks if content-type header is multipart/form-data. |
+| name | Route name, defaults to empty string. |
+| group | Route group, defaults to empty string. |
+| res | HTTP/1.1 points to response, HTTP/2 points to stream. |
+| req | HTTP/1.1 is `IncomingMessage` object, HTTP/2 points to stream object. |
+| box | Defaults to empty object. Can add any property value to dynamically pass info to next layer components. |
+| service | Object for dependency injection, points to `app.service`. |
+| data | Saves final data to return to client. Assign to data or use `ctx.to`. Pre-v24.x was `ctx.res.body`. |
+| ext | Provides helper functions. See wiki. |
+| to(data) | Function to set `ctx.data`. |
+| write(data) | Directly write data to client. |
+| moveFile(file:object, target_filepath:string) | Function to move uploaded file to specified path. |
+| status() | Function to set status code. |
+| setHeader(k, v) | Function to set header. |
+| removeHeader(k) | Function to remove header waiting to be sent. |
+| getFile(name) | Function to get uploaded file info (reads files property). |
+| sendHeader() | Function to send headers for http2. `setHeader` only caches headers. For http/1.1, this is an empty function for code consistency. |
+| user | Standard property for user login, defaults to null. |
+| json(data) | Function, sets return data and marks type as json. |
+| text(data) | Function, sets return data and marks type as text. |
+| html(data) | Function, sets return data and marks type as html. |
+| pipe(filepath) | Function, stream response data. Example: `await ctx.setHeader('content-type', 'text/html').pipe('./index.html')` |
+| pipeJson(filepath) | Stream file data as json type. |
+| pipeText(filepath) | Stream file data as text type. |
+| pipeHtml(filepath) | Stream file data as html type. |
 
-**Note:** The `send` function only sets `ctx.data`. It’s equivalent to direct assignment but helps catch errors faster, as incorrect property assignments create new properties without errors, leading to incorrect responses.
+Note: `to` function only sets `ctx.data` value; data is returned at the end. It's same as direct assignment, but function calls reveal errors faster (wrong assignment adds a property without error but returns incorrect data).
 
 ## Dependency Injection
 
-The request context includes a `service` property pointing to `app.service`. After initializing the `app`, you can attach pre-initialized data or instances to `app.service`.
+The request context has a `service` item pointing to `app.service`. After initializing the app, all data/instances needed can be mounted to `app.service`.
 
-```javascript
-'use strict'
+``` JavaScript
 
-const titbit = require('titbit')
+'use strict';
 
-const app = new titbit({
+const Topbit = require('topbit');
+
+let app = new Topbit({
   debug: true
-})
+});
 
 // Overwrites if exists, adds if not.
-app.addService('name', 'first')
+app.addService('name', 'first');
 app.addService('data', {
-  id: 123,
-  ip: '127.0.0.1'
-})
+  id : 123,
+  ip : '127.0.0.1'
+});
 
+/*
+This might seem useless in a single file where variables are accessible.
+However, it becomes very important for module separation.
+*/
 app.get('/info', async c => {
-  c.send({
-    name: c.service.name,
-    data: c.service.data
+  c.to({
+    name : c.service.name,
+    data : c.service.data
   })
 })
 
 app.run(1234)
+
 ```
 
-## Extending the Request Context
+## Extending Request Context
 
-To extend the request context, use `app.httpServ.context`. This is the constructor for the request context.
+To add extension support to the request context object, use `app.httpServ.context`. This property is the constructor for the request context.
 
 **Example:**
 
 ```javascript
 'use strict'
-
-const titbit = require('titbit')
-
-const app = new titbit({
-  debug: true
+const Topbit = require('topbit')
+const app = new Topbit({
+    debug: true
 })
 
-// `this` refers to the request context
+// 'this' represents the request context
 app.httpServ.context.prototype.testCtx = function () {
-  console.log(this.method, this.path)
+    console.log(this.method, this.path)
 }
 
 app.get('/test', async ctx => {
-  ctx.testCtx()
+    ctx.testCtx()
 })
 
 app.run(1234)
+
 ```
 
-## `app.isMaster` and `app.isWorker`
+## app.isMaster and app.isWorker
 
-Since Node.js v16.x, the `cluster` module recommends `isPrimary` over `isMaster`, though `isMaster` remains available. After initializing the `app`, `app.isMaster` and `app.isWorker` getter properties are provided, mirroring `cluster` properties to:
+Node.js v16.x recommends `isPrimary` over `isMaster`. However, `isMaster` is still available. After Topbit initialization, `app` has two getters: `isMaster` and `isWorker`. They function identically to `cluster` properties. Purposes:
 
-- Avoid requiring `const cluster = require('cluster')`.
-- Shield against future `cluster` incompatibilities.
+- Avoid writing `const cluster = require('cluster')` again.
+- Shield future incompatible changes in `cluster`, enhancing code compatibility.
 
-## `daemon` and `run`
+## daemon and run
 
-The `run` interface accepts `port` and `host` (default: `0.0.0.0`). It also supports a `sockPath` (e.g., `.sock` file), consistent with the HTTP `listen` interface, in which case `host` is ignored.
+`run` parameters: `port`, `host`. `host` defaults to `0.0.0.0`. Can also be `sockPath` (path to .sock file), supported by http listen interface. Using .sock ignores host.
 
-The `daemon` interface shares the same first two parameters but supports a third parameter specifying the number of subprocesses. If set to 0, it defaults to the number of CPU cores. It maintains subprocess stability by creating new ones if any terminate unexpectedly.
+`daemon` first two parameters match `run`. Third parameter is a number indicating how many child processes to use. Defaults to 0, which automatically creates child processes based on CPU core count. It maintains stable child process count, creating new ones if any terminate unexpectedly.
 
-**In cluster mode, the maximum number of subprocesses is twice the CPU core count.**
+**In cluster mode, max child processes will not exceed 2x CPU cores.**
 
-**Examples:**
+Example:
 
 ```javascript
-// Default host: 0.0.0.0, port: 1234
+
+// Host defaults to 0.0.0.0, port 1234
 app.run(1234)
 
-// Listen on localhost (local access only)
+// Listen on localhost, only accessible locally
 app.run(1234, 'localhost')
 
-// Use 2 subprocesses, default host: 0.0.0.0
+// Use 2 child processes, host defaults to 0.0.0.0
 app.daemon(1234, 2)
 
-// Use 3 subprocesses
+// Use 3 child processes
 app.daemon(1234, 'localhost', 3)
+
 ```
 
 ## Logging
 
-The framework provides global logging when using `daemon` mode (cluster). Enable it with the `globalLog` option, which supports file output or terminal output (in single-process `run` mode, logs go to the terminal but can be redirected to files).
+The framework provides global logging. When using cluster mode (`daemon` interface), use initialization option `globalLog` to enable global logs and specify a log file. In single process mode, logs output to terminal (can use output/error redirection to save to file).
 
-**Note: Only `daemon` mode supports saving logs to files. In `run` mode, logs are output to the terminal but can be redirected.**
+**Note: Only daemon execution (cluster mode) allows saving logs to file natively. `run` (single process) outputs to screen; use IO redirection to save.**
 
-You can use the `logHandle` option to define a custom logging function, which overrides `logFile` and `errorLogFile`.
+Besides file saving and terminal output, `logHandle` option allows custom log processing functions.
 
-**Example:**
+**Setting `logHandle` invalidates `logFile` and `errorLogFile`. See code for details.**
 
-```javascript
-const titbit = require('titbit')
+Example:
 
-const app = new titbit({
+``` JavaScript
+
+const Topbit = require('topbit')
+
+const app = new Topbit({
   debug: true,
+  // Enable global log
   globalLog: true,
-  logType: 'file', // 'file' for file output, 'stdio' for terminal
-  logFile: '/tmp/titbit.log', // Successful requests (2xx, 3xx)
-  errorLogFile: '/tmp/titbit-error.log', // Error requests (4xx, 5xx)
-  logHandle: (w, msg) => {
-    // Custom log handler; overrides logFile and errorLogFile
-    // `msg` format: { type: '_log', success: true, log: '@ GET | https://localhost:2021/randst | 200 | 2020-10-31 20:27:7 | 127.0.0.1 | User-Agent' }
+
+  // Output to file. Default is 'stdio' (terminal).
+  logType: 'file'
+
+  // Log file for status codes 2xx or 3xx
+  logFile : '/tmp/topbit.log',
+
+  // Log file for errors (4xx or 5xx)
+  errorLogFile: '/tmp/topbit-error.log',
+
+  // Custom handler function. logFile/errorLogFile become invalid.
+  // Parameters: (worker, message)
+  // worker: see cluster worker docs
+  /*
+    msg is log object, properties:
+      {
+        type : '_log',
+        success : true,
+        log : '@ GET | https://localhost:2021/randst | 200 | 2020-10-31 20:27:7 | 127.0.0.1 | User-Agent'
+      }
+  */
+  logHandle : (w, msg) => {
     console.log(w.id, msg)
   }
+
 })
 
 app.daemon(1234, 3)
+
 ```
 
-Middleware-based logging does not conflict with global logging but cannot capture 404 errors (no route found), as the framework returns early without creating a request context.
+Using middleware for logging does not conflict with global logging. However, middleware logging cannot capture 404s returned by the framework when no route matches (as context is not created to avoid overhead).
+
+Furthermore, this method integrates better with cluster mode as it uses master-worker communication internally.
 
 ## Message Event Handling
 
-In `daemon` mode (using `cluster`), the `setMsgEvent` function handles messages sent by subprocesses. Messages must be objects with a required `type` property indicating the event name.
+Based on the `message` event, in daemon mode (based on cluster module), a `setMsgEvent` function is provided to handle events sent by child processes.
 
-**Example:**
+This requires the message sent by worker processes to be an object, with a mandatory `type` property indicating the event name. Other fields can be custom.
 
-```javascript
-const titbit = require('titbit')
+Usage:
+
+``` JavaScript
+
+const Topbit = require('topbit')
 const cluster = require('cluster')
 
-const app = new titbit({
+const app = new Topbit({
   debug: true,
   loadInfoFile: '/tmp/loadinfo.log'
 })
 
 if (cluster.isMaster) {
   app.setMsgEvent('test-msg', (worker, msg, handle) => {
-    worker.send({
-      id: worker.id,
-      data: 'ok'
+    // Child process receives message via message event
+    worker.to({
+      id : worker.id,
+      data : 'ok'
     })
+
     console.log(msg)
   })
 } else {
+  // Receive message sent by worker.to
   process.on('message', msg => {
     console.log(msg)
   })
 
-  setInterval(() => {
-    process.send({
-      type: 'test-msg',
-      pid: process.pid,
-      time: new Date().toLocaleString()
+  setIneterval(() => {
+    process.to({
+      type : 'test-msg',
+      pid : process.pid,
+      time : (new Date()).toLocaleString()
     })
   }, 1000)
+
 }
+
 ```
 
-Since v22.4.0, the `app.send` method simplifies sending messages from workers to the master process.
+Sending messages from worker processes is complex. Since version 22.4.0, a `send` method is provided for quick message sending. It only sends to master from a worker process, so no extra worker check is needed.
 
-## `app.send` and `app.workerMsg`
+## app.to and app.workerMsg
 
-Rewriting the above example using `app.send` and `app.workerMsg`:
+Let's rewrite the worker message sending part of the code above:
 
 ```javascript
-const titbit = require('titbit')
 
-const app = new titbit({
+const Topbit = require('topbit')
+
+const app = new Topbit({
   debug: true,
   loadInfoFile: '/tmp/loadinfo.log'
 })
 
+// Master process registers message event type. Worker process ignores this.
 app.setMsgEvent('test-msg', (worker, msg, handle) => {
-  worker.send({
-    id: worker.id,
-    data: 'ok'
+  // Child process receives message via message event
+  worker.to({
+    id : worker.id,
+    data : 'ok'
   })
+
   console.log(msg)
 })
 
+// Only worker process listens.
 app.workerMsg(msg => {
   console.log(msg)
 })
 
-cluster.isWorker &&
-  setInterval(() => {
-    app.send('test-msg', {
-      pid: process.pid,
-      time: new Date().toLocaleString()
-    })
-  }, 1000)
+cluster.isWorker
+    &&
+setInterval(() => {
+  // Only worker executes.
+  app.to('test-msg', {
+    pid: process.pid,
+    time: (new Date).toLocaleString()
+  })
+
+}, 1000)
 
 app.daemon(1234, 2)
+
 ```
 
-## Automatic Subprocess Adjustment
+## Automatically Adjusting Child Process Quantity
 
-The `daemon` interface sets the base number of subprocesses:
+The parameter passed to `daemon` sets the base number of child processes, e.g.:
 
-```javascript
-// Use 2 subprocesses
+``` JavaScript
+
+// Use 2 child processes to handle requests.
 app.daemon(1234, 2)
+
 ```
 
-To automatically adjust subprocesses based on load, use `autoWorker` to set a maximum number of subprocesses (must be greater than the base number):
+To automatically create child processes based on load and terminate them when idle (maintaining base quantity), use `autoWorker` to set a maximum value. This value must be larger than the base quantity to take effect.
 
 ```javascript
-// Maximum 9 subprocesses
+
+// Max 9 child processes.
 app.autoWorker(9)
 
+//...
+
 app.daemon(1234, 2)
+
 ```
 
-When load is high, new subprocesses are created. When idle, subprocesses with zero connections are terminated to revert to the base number.
+When load is high, child processes are created. After a period of idleness, processes with 0 connections are terminated, restoring the base number.
 
-**Available since v21.9.6. Use the latest version for improved stability and performance.**
+**Available in v21.9.6+. Please use the latest version as this feature has been improved for stability and performance in subsequent versions.**
+
+----
 
 ## Strong Mode
 
-Enable `strong` mode to handle `uncaughtException` and `unhandledRejection` events, ensuring program stability. Simply set `strong: true`.
+Enable strong mode via the `strong` option. This monitors `uncaughtException` and `unhandledRejection` events to ensure stable operation. Simplest usage: set `strong` to `true`.
 
-**All `strong` mode features can be implemented manually using the `process` module; this just simplifies the process.**
+**All strong mode features can be implemented via the `process` module; this just simplifies it.**
 
 ```javascript
-'use strict'
+'use strict';
 
-const titbit = require('titbit')
+const Topbit = require('topbit');
 
 setTimeout(() => {
-  throw new Error('test error')
-}, 2000)
+  // Throw exception inside timer loop
+  throw new Error(`test error`)
+}, 2000);
 
-const app = new titbit({
-  debug: true,
-  strong: true
-})
+const app = new Topbit({
+    // Debug mode, output errors.
+    debug: true,
+    // Enable strong mode
+    strong: true
+});
 
-app.run(1234)
+app.run(1234);
+
 ```
 
-By default, `strong` mode catches:
+By default, strong mode captures:
 
 ```
-TypeError, ReferenceError, RangeError, AssertionError, URIError, Error
+'TypeError', 'ReferenceError', 'RangeError', 'AssertionError', 'URIError', 'Error'
 ```
 
-Customize handling with an object:
+You can customize handling by passing an object to `strong`.
 
 ```javascript
-const app = new titbit({
-  debug: true,
-  strong: {
-    quiet: true, // Suppress error output
-    errorHandle: (err, errname) => {
-      // Custom error handling
-    },
-    catchErrors: ['TypeError', 'URIError', 'Error', 'RangeError']
-  }
-})
+
+// Core code example
+const app = new Topbit({
+    // Debug mode, output errors.
+    debug: true,
+    // Enable strong mode
+    strong: {
+      // Silent behavior, no error output.
+      quiet: true,
+      // Custom error handler
+      errorHandle: (err, errname) => {
+        //....
+      },
+
+      // Which errors to catch
+      catchErrors: [
+        'TypeError', 'URIError', 'Error', 'RangeError'
+      ]
+
+    }
+});
+
 ```
 
-## Running HTTP and HTTPS Simultaneously?
+## Simultaneous HTTP and HTTPS?
 
-**This is not recommended in production.** If HTTPS is enabled, HTTP is unnecessary, and some front-end features require HTTPS.
+Note the question mark. You shouldn't do this in production. If HTTPS is enabled, HTTP isn't needed, and some frontend features won't work without HTTPS.
 
-For testing, you can do:
+If needed (perhaps for testing), do this:
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
 const http = require('node:http')
-const https = require('node:https')
+const https = require('https')
 
-const app = new Titbit({
-  debug: true
+const app = new Topbit({
+    // Enable debug
+    debug: true,
 })
+
+// Below are http/1.1 services. For http2, enable http2 and compatibility mode.
+// Or use topbit-httpc extension.
+
+// In this case, you must set event listeners manually.
 
 let http_server = http.createServer(app.httpServ.onRequest())
 let https_server = https.createServer(app.httpServ.onRequest())
 
 http_server.listen(2025)
 https_server.listen(2026)
+
 ```
 
-**Note: This setup does not support HTTP/2. Use HTTP/2 with `allowHTTP1` for compatibility.**
+**Note: You cannot support http2 in this scenario, but you can use http2 to be compatible with http1.**
 
-## Miscellaneous
+## Request Limiting
 
-- A final middleware handles responses, automatically setting `content-type` (e.g., `text/plain`, `text/html`, `application/json`) if not set.
-- Default limits on URL length and memory usage are based on hardware.
-- Configurations and middleware allow for extension and overrides.
-- The framework is optimized for speed. For performance comparisons, test with multiple middleware and hundreds of routes.
-- The `sched` function sets cluster scheduling policy (`'rr'` or `'none'`), equivalent to `cluster.schedulingPolicy`.
+The framework provides IP-based rate limiting to prevent dense requests from the same IP. For HTTP/2, use `http2limit` module from `topbit-toolkit`.
 
-The framework auto-detects memory size and sets limits, adjustable via the `secure` object in `daemon` mode:
+```javascript
+'use strict';
+
+const Topbit = require('topbit')
+
+const app = new Topbit({
+    debug : true,
+    // Enable request limiting
+    useLimit: true,
+
+    // IPs allowed without frequency limit
+    allow: new Set(['127.0.0.1']),
+
+    // IPs to deny
+    deny: (ip) => {
+      // Example only, supports function and Set
+      if (ip.indexOf('1.') === 0) return false
+      return true
+    },
+    
+    // Max requests per IP within unit time
+    maxIPRequest: 6,
+    
+    // Unit time, 15 seconds
+    unitTime: 15,
+    
+    // Max concurrent connections per worker process
+    maxConn: 2000,
+
+    loadMonitor: true,
+    loadInfoType : 'text',
+    globalLog : true,
+    logType: 'stdio',
+    // Load info in memory
+    loadInfoFile : '--mem'
+})
+
+
+app.get('/', async ctx => {
+  ctx.to('ok')
+})
+
+// Use 3 worker processes. Each allows 6 requests/unit time.
+// Total approx 6 requests? Set maxIPRequest to 2.
+app.daemon(1234, '0.0.0.0', 3)
+
+```
+
+## Other
+
+- After running, Topbit has a final wrapper middleware. Setting `c.data` returns data. It detects simple text types and sets content-type automatically (text/plain, text/html, application/json) if not set.
+
+- Defaults to limiting max URL length and sets a max memory usage rate based on hardware.
+
+- All of this can be extended/overridden via config options or middleware.
+
+- It is fast, and we focus on optimization. If comparing, add multiple middleware and hundreds of routes to test.
+
+- Provides a `sched` function to quickly set cluster scheduling policy ('rr' or 'none'). Sets `cluster.schedulingPolicy`.
+
+The framework automatically detects memory size and sets limits on initialization. You can change limits via properties in `secure` after init, but this requires using `daemon` (master managing workers).
 
 ```javascript
 'use strict'
 
-const Titbit = require('titbit')
+const Topbit = require('topbit');
 
-let app = new Titbit()
+let app = new Topbit();
 
-// Max memory 600MB, restarts only when connections are 0.
-app.secure.maxmem = 600_000_000
+/*
+ Operations below can be controlled via memFactor option. See config options above.
+ */
 
-// Hard limit 900MB; restarts if exceeded, even with active connections.
-app.secure.diemem = 900_000_000
+// Max memory 600M, auto restart only when connection count is 0.
+app.secure.maxmem = 600_000_000;
 
-// Max RSS memory 800MB (excludes Buffer allocations).
-app.secure.maxrss = 800_000_000
+// Mandatory restart max memory limit 900M. Total memory usage including Buffers.
+// Must be larger than maxmem. If memory > maxmem AND connections != 0, 
+// AND continues to exceed diemem, process restarts immediately.
+app.secure.diemem = 900_000_000;
+
+// Max RSS memory 800M. Program memory usage, excluding Buffer allocations.
+app.secure.maxrss = 800_000_000;
 
 app.get('/', async c => {
-  c.send('ok')
+  c.to('ok');
 })
 
-app.daemon(8008, 2)
+app.daemon(8008, 2);
+
 ```
 
-**Requires `loadMonitor: true` (default unless set to `false`).**
+**Note: Requires `loadMonitor` option (enabled by default unless set to false).**
 
-Use default configurations unless specific control is needed.
+Service initialization automatically sets configuration based on available system memory. Unless necessary, stick to default configurations.

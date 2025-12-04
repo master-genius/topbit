@@ -216,7 +216,7 @@ class Topbit {
       notFound  : 'not found',
       badRequest : 'bad request',
       //展示负载信息，必须使用daemon接口
-      showLoadInfo  : true,
+      loadMonitor  : true,
       loadInfoType  : 'text', // text | json | orgjson | --null
       loadInfoFile  : '',
   
@@ -373,10 +373,6 @@ class Topbit {
           break;
   
         case 'loadMonitor':
-          this.config.showLoadInfo = !!options[k];
-          break;
-  
-        case 'showLoadInfo':
         case 'daemon':
         case 'debug':
         case 'globalLog':
@@ -583,7 +579,7 @@ class Topbit {
       }
     }
   
-    if (this.config.showLoadInfo) {
+    if (this.config.loadMonitor) {
       this.monitor = new Monitor({
         config : this.config,
         secure : this.secure,
@@ -1265,7 +1261,7 @@ class Topbit {
 
     } else if (cluster.isWorker) {
 
-      if (this.config.showLoadInfo) {
+      if (this.config.loadMonitor) {
         this.monitor.workerSend();
       }
 
