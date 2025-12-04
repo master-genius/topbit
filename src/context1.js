@@ -105,20 +105,20 @@ class Context {
   }
 
   sendHeader() {
-    !this.response
-      && !this.response.headersSent
-      && this.response.writeHead(this.response.statusCode)
+    !this.resp
+      && !this.res.headersSent
+      && this.res.writeHead(this.res.statusCode)
 
     return this
   }
 
   status(stcode = null) {
     if (stcode === null) {
-      return this.response.statusCode
+      return this.res.statusCode
     }
 
-    if (this.response) {
-      this.response.statusCode = stcode
+    if (this.res) {
+      this.res.statusCode = stcode
     }
 
     return this
