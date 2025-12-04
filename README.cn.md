@@ -705,8 +705,6 @@ app.use(async (c, next) => {
 })
 
 //use可以级联: app.use(m1).use(m2)
-//在21.5.4版本以后，不过这个功能其实根本不重要
-//因为有topbit-loader扩展，实现的功能要强大的多。
 
 ```
 

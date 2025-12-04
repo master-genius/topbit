@@ -678,8 +678,6 @@ app.use(async (c, next) => {
 })
 
 // use can be cascaded: app.use(m1).use(m2)
-// Available after v21.5.4, but this feature is not critical
-// because the topbit-loader extension offers much more powerful functionality.
 ```
 
 ## Topbit Complete Flow Chart
