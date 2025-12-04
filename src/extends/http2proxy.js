@@ -628,11 +628,11 @@ Http2Proxy.prototype.mid = function () {
           stm.destroy(err)
         })
 
-        c.request.on('data', chunk => {
+        c.req.on('data', chunk => {
           stm.write(chunk)
         })
 
-        c.request.on('end', () => {
+        c.req.on('end', () => {
           stm.end()
         })
 
