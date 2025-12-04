@@ -1,6 +1,6 @@
 {
   "name": "topbit",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "A Server-side web framework support http/1.1 and http/2",
   "main": "src/topbit.js",
   "directories": {
@@ -33,6 +33,9 @@
     "framework",
     "tidbit",
     "proxy",
+    "http2proxy",
+    "mvc",
+    "api",
     "webserver",
     "backend",
     "serverside"
