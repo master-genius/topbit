@@ -10,6 +10,7 @@ let ctxpool = new function () {
     if (this.pool.length > 0) {
       return this.pool.pop()
     }
+
     return null
   }
 

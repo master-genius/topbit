@@ -234,7 +234,7 @@ class Topbit {
   
       maxUrlLength: 1152,
   
-      maxpool : 4096,
+      maxpool : 8192,
   
       //子进程汇报资源信息的定时器毫秒数。
       monitorTimeSlice: 500,
@@ -266,7 +266,7 @@ class Topbit {
       //-1表示使用timeout的设置。
       streamTimeout: -1,
   
-      requestTimeout: 100000,
+      requestTimeout: 65_000,
   
       maxLoadRate: 75
     };
@@ -279,7 +279,7 @@ class Topbit {
       deny_type     : 's',
       //每秒单个IP可以进行请求次数的上限，0表示不限制。
       maxIPRequest  : 0,
-      unitTime      : 60_000,
+      unitTime      : 30_000,
       maxIPCache    : 10_0000,
       allow         : null,
       allow_type    : 's',

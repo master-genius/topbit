@@ -16,18 +16,18 @@ class Middleware extends MidCore {
       await this.exec(ctx, ctx.group);
     } catch (err) {
       
-      this.errorHandle(err, '--ERR-RESPONSE--');
+      this.errorHandle(err, '--ERR-res--');
 
       try {
-        if (ctx.response && !ctx.response.writableEnded) {
-          ctx.response.statusCode = 500;
-          ctx.response.end();
+        if (ctx.res && !ctx.res.writableEnded) {
+          ctx.res.statusCode = 500;
+          ctx.res.end();
         }
       } catch (err) {}
 
     } finally {
-      ctx.request = null;
-      ctx.response = null;
+      ctx.req = null;
+      ctx.res = null;
       ctx.data = null;
       ctx.box = null;
       ctx.service = null;
@@ -37,7 +37,6 @@ class Middleware extends MidCore {
       ctx.rawBody = null;
       ctx.files = null;
       ctx.param = null;
-      ctx.reply = null;
       ctx.user = null;
       ctx = null;
     }
@@ -53,7 +52,7 @@ class Middleware extends MidCore {
     let fr = async (ctx, next) => {
       await next();
 
-      if (!ctx.response || ctx.response.writableEnded || !ctx.response.writable || ctx.response.destroyed) {
+      if (!ctx.res || ctx.res.writableEnded || !ctx.res.writable || ctx.res.destroyed) {
         return;
       }
 
@@ -63,10 +62,10 @@ class Middleware extends MidCore {
       let content_type = 'text/plain;charset=utf-8';
       let datatype = typeof ctx.data;
 
-      if (!(ctx.response.headersSent || ctx.response.hasHeader('content-type')) )
+      if (!(ctx.res.headersSent || ctx.res.hasHeader('content-type')) )
       {
         if (datatype === 'object') {
-          ctx.response.setHeader('content-type','application/json;charset=utf-8');
+          ctx.res.setHeader('content-type','application/json;charset=utf-8');
         }
         else if (datatype === 'string' && ctx.data.length > 1) {
           switch (ctx.data[0]) {
@@ -80,18 +79,18 @@ class Middleware extends MidCore {
               break;
             default:;
           }
-          ctx.response.setHeader('content-type', content_type);
+          ctx.res.setHeader('content-type', content_type);
         }
       }
 
       if (!ctx.data) {
-        ctx.response.end()
+        ctx.res.end()
       } else if (ctx.data instanceof Buffer || datatype === 'string') {
-        ctx.response.end(ctx.data, ctx.dataEncoding)
+        ctx.res.end(ctx.data, ctx.dataEncoding)
       } else if (datatype === 'number') {
-        ctx.response.end(`${ctx.data}`)
+        ctx.res.end(`${ctx.data}`)
       } else {
-        ctx.response.end(JSON.stringify(ctx.data))
+        ctx.res.end(JSON.stringify(ctx.data))
       }
 
     }

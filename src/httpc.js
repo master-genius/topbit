@@ -132,10 +132,10 @@ Httpc.prototype.onRequest = function () {
     ctx.ip = remote_ip
 
     ctx.port = req.socket.remotePort
-    ctx.request = req
-    ctx.response = res
+    ctx.req = req
+    ctx.res = res
     ctx.stream = res
-    ctx.reply = ctx.response
+
     ctx.headers = req.headers
 
     ctx.path = urlobj.path

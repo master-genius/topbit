@@ -60,9 +60,9 @@ class Context {
     //在请求时指向实际的stream
     this.stream = null
 
-    this.request = null
+    this.req = null
 
-    this.reply = null
+    this.res = null
 
     this.box = {}
     
@@ -72,18 +72,18 @@ class Context {
   }
 
   json(data) {
-    return this.setHeader('content-type', 'application/json').send(data)
+    return this.setHeader('content-type', 'application/json').to(data)
   }
 
   text(data, encoding='utf-8') {
-    return this.setHeader('content-type', `text/plain;charset=${encoding}`).send(data)
+    return this.setHeader('content-type', `text/plain;charset=${encoding}`).to(data)
   }
 
   html(data, encoding='utf-8') {
-    return this.setHeader('content-type', `text/html;charset=${encoding}`).send(data)
+    return this.setHeader('content-type', `text/html;charset=${encoding}`).to(data)
   }
 
-  send(d) {
+  to(d) {
     this.data = d
   }
 
@@ -147,7 +147,7 @@ class Context {
       this.sendHeader()
     }
 
-    return ext.pipe(filename, this.reply, options)
+    return ext.pipe(filename, this.res, options)
   }
 
   pipeJson(filename) {
@@ -170,10 +170,13 @@ class Context {
   write(data) {
     this.stream && !this.stream.headersSent && this.stream.respond(this.dataHeaders)
 
-    this.reply.write(data)
+    this.stream.write(data)
     return this
   }
 
 }
+
+Context.prototype.oo = Context.prototype.to
+Context.prototype.ok = Context.prototype.to
 
 module.exports = Context

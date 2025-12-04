@@ -34,7 +34,8 @@ class Middleware extends MidCore {
       ctx.data = null;
       ctx.dataHeaders = null;
       ctx.stream = null;
-      ctx.request = null;
+      ctx.req = null;
+      ctx.res = null;
       ctx.service = null;
       ctx.box = null;
       ctx.requestCall = null;
@@ -43,7 +44,6 @@ class Middleware extends MidCore {
       ctx.rawBody = null;
       ctx.files = null;
       ctx.param = null;
-      ctx.reply = null;
       ctx.user = null;
       ctx = null;
     }
@@ -56,11 +56,7 @@ class Middleware extends MidCore {
       
       await next();
 
-      if(!ctx.stream
-        || ctx.stream.closed 
-        || ctx.stream.destroyed
-        || !ctx.stream.writable)
-      {
+      if(!ctx.stream || ctx.stream.closed || ctx.stream.destroyed || !ctx.stream.writable) {
         return ;
       }
 

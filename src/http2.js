@@ -126,8 +126,8 @@ class Httpt {
       ctx.ip = remote_ip;
       ctx.port = stream.session.socket.remotePort;
       ctx.stream = stream;
-      ctx.reply = ctx.stream;
-      ctx.request = ctx.stream;
+      ctx.res = ctx.stream;
+      ctx.req = ctx.stream;
      
       ctx.dataHeaders = {};
       ctx.headers = headers;
@@ -152,7 +152,7 @@ class Httpt {
 
   mid() {
     let self = this;
-    let noBodyMethods = {};
+    let noBodyMethods = Object.create(null);
 
     ['GET','OPTIONS','HEAD','TRACE'].forEach(a => {
       noBodyMethods[a] = true;
@@ -164,7 +164,7 @@ class Httpt {
       let bodyBuffer;
 
       await new Promise((rv, rj) => {
-        if ( noBodyMethods[ctx.method] ) {
+        if (noBodyMethods[ctx.method]) {
           ctx.stream.on('data', data => {
             ctx.stream.respond({':status' : '400'});
             ctx.stream.end(self.config.badRequest);

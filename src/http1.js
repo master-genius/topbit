@@ -122,9 +122,8 @@ class Http1 {
       ctx.ip = remote_ip;
 
       ctx.port = req.socket.remotePort;
-      ctx.request = req;
-      ctx.response = res;
-      ctx.reply = ctx.response;
+      ctx.req = req;
+      ctx.res = res;
 
       ctx.path = urlobj.path;
       ctx.query = urlobj.query;
@@ -147,7 +146,7 @@ class Http1 {
   mid() {
     let self = this;
 
-    let noBodyMethods = {};
+    let noBodyMethods = Object.create(null);
 
     ['GET','OPTIONS','HEAD','TRACE'].forEach(a => {
       noBodyMethods[a] = true;
@@ -162,24 +161,24 @@ class Http1 {
         //客户端和服务端解析不会允许非法method
         if ( noBodyMethods[ctx.method] ) {
           //实际上这个回调函数不会执行，因为会立即触发end事件，此处可以保证非法的请求也可以提交数据。
-          ctx.request.on('data', data => {
-            ctx.response.statusCode = 400;
-            ctx.response.end(self.config.badRequest);
-            ctx.request.destroy();
+          ctx.req.on('data', data => {
+            ctx.res.statusCode = 400;
+            ctx.res.end(self.config.badRequest);
+            ctx.req.destroy();
           });
         } else {
           let bigBodyEnd = false;
           bodyBuffer = [];
-          ctx.request.on('data', data => {
+          ctx.req.on('data', data => {
             bodylength += data.length;
             if (bodylength > ctx.maxBody) {
               if (bigBodyEnd) return;
               bigBodyEnd = true;
 
               bodyBuffer = null;
-              ctx.response.statusCode = 413;
-              ctx.response.end('', () => {
-                ctx.request.destroy();
+              ctx.res.statusCode = 413;
+              ctx.res.end('', () => {
+                ctx.req.destroy();
               });
               return ;
             }
@@ -189,18 +188,18 @@ class Http1 {
 
         //若请求体太大，此时会进行destroy处理，触发close事件，但不会触发end。
         //通过记录resolved状态避免重复调用rv。
-        ctx.request.on('close', () => {
+        ctx.req.on('close', () => {
           (!resolved) && rv();
         });
 
-        ctx.request.on('end',() => {
+        ctx.req.on('end',() => {
           resolved = true;
           rv();
         });
         
       });
 
-      if (!ctx.response.writable || ctx.response.writableEnded) {
+      if (!ctx.res.writable || ctx.res.writableEnded) {
         return;
       }
 
