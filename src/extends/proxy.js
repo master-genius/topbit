@@ -562,7 +562,7 @@ class Proxy {
       timeout : this.timeout + 30_000,
       method: 'TRACE',
       headers: {
-        'user-agent': 'Node.js/Titbit,Titbit-Toolkit: Proxy,AliveCheck'
+        'user-agent': 'Node.js/Topbit,Topbit-Toolkit: Proxy,AliveCheck'
       }
     }
 
