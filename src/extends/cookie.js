@@ -8,39 +8,37 @@ class Cookie {
   mid() {
 
     return async (rr, next) => {
-      
-      rr.cookie = {};
+      rr.cookie = {}
 
       if (rr.headers['cookie']) {
-        let cookies = rr.headers['cookie'].split(';').filter(c => c.length > 0);
+        let cookies = rr.headers['cookie'].split(';').filter(c => c.length > 0)
     
-        let tmpList = [];
-        let name = '';
+        let tmpList = []
+        let name = ''
 
-        for(let i = 0; i < cookies.length; i++) {
-
-          tmpList = cookies[i].split('=').filter(p => p.length > 0);
-          name = tmpList[0].trim();
+        for (let i = 0; i < cookies.length; i++) {
+          tmpList = cookies[i].split('=').filter(p => p.length > 0)
+          name = tmpList[0].trim()
 
           if (name.length == 0) {
-            continue;
+            continue
           }
+
           if (tmpList.length < 2) {
-            rr.cookie[name] = '';
-          }
-          else {
-            rr.cookie[name] = tmpList[1];
+            rr.cookie[name] = ''
+          } else {
+            rr.cookie[name] = tmpList[1]
           }
         }
       }
 
-      await next();
+      await next(rr)
       
-      rr.cookie = null;
-    };
+      rr.cookie = null
+    }
 
   }
 
 }
 
-module.exports = Cookie;
+module.exports = Cookie

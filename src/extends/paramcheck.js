@@ -224,10 +224,10 @@ class ParamCheck {
 
           let r = self.dataFilter(c)
           if (!r.ok) {
-            return c.status(400).send(dataObject[r.key].errorMessage || self.errorMessage)
+            return c.status(400).to(dataObject[r.key].errorMessage || self.errorMessage)
           }
 
-          await next()
+          await next(c)
         }
 
       }
@@ -237,16 +237,16 @@ class ParamCheck {
           let obj = c[self.key]
 
           for (let k of self.deny) {
-            if (obj[k] !== undefined) return c.status(400).send(self.denyMessage)
+            if (obj[k] !== undefined) return c.status(400).to(self.denyMessage)
           }
         }
 
         let r = self.dataFilter(c)
         if (!r.ok) {
-          return c.status(400).send(dataObject[r.key].errorMessage || self.errorMessage)
+          return c.status(400).to(dataObject[r.key].errorMessage || self.errorMessage)
         }
 
-        await next()
+        await next(c)
       }
       
     }
@@ -254,10 +254,10 @@ class ParamCheck {
     return async (c, next) => {
       let r = self.dataFilter(c)
       if (!r.ok) {
-        return c.status(400).send(dataObject[r.key].errorMessage || self.errorMessage)
+        return c.status(400).to(dataObject[r.key].errorMessage || self.errorMessage)
       }
 
-      await next()
+      await next(c)
     }
   }
 

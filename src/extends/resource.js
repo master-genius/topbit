@@ -305,7 +305,7 @@ class Resource {
           c.setHeader('cache-control', self.cacheControl)
         }
 
-        return c.send(r.data)
+        return c.to(r.data)
       }
 
       let data = null
@@ -347,7 +347,7 @@ class Resource {
 
           self.cacheControl && c.setHeader('cache-control', self.cacheControl);
 
-          c.sendHeader().send(zipdata || data)
+          c.sendHeader().to(zipdata || data)
         } else {
           let fst = await fsp.stat(pathfile)
 
@@ -381,7 +381,7 @@ class Resource {
           self.size += zipdata ? zipdata.length : data.length
         }
       } catch (err) {
-        c.status(404).send('read file failed')
+        c.status(404).to('read file failed')
       }
   
     }

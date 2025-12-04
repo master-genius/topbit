@@ -322,7 +322,7 @@ class Cors {
         self.optionsCache && ctx.setHeader('access-control-max-age', self.optionsCache)
         ctx.status(self.statusCode)
       } else {
-        return await next()
+        return await next(ctx)
       }
       
     }

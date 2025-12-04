@@ -23,7 +23,7 @@ class RealIP {
         }
       }
 
-      await next()
+      await next(c)
 
     }
 

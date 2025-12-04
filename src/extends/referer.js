@@ -54,9 +54,9 @@ class Referer {
       }
       
       if (stat) {
-        await next();
+        await next(c);
       } else {
-        c.status(self.failedCode).send('');
+        c.status(self.failedCode).to('');
       }
 
     };

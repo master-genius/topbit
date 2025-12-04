@@ -420,10 +420,10 @@ Http2Proxy.prototype.mid = function () {
 
     if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
       if (self.full) {
-        return c.status(502).send(error_502_text) 
+        return c.status(502).to(error_502_text) 
       }
 
-      return await next()
+      return await next(c)
     }
 
     let pr = self.getBackend(c, host)
@@ -443,7 +443,7 @@ Http2Proxy.prototype.mid = function () {
           }
         }
 
-        if (!pr) return c.status(503).send(error_503_text)
+        if (!pr) return c.status(503).to(error_503_text)
       }
     }
 
@@ -484,7 +484,7 @@ Http2Proxy.prototype.mid = function () {
         }
 
         if (session_client.deny)
-          return c.status(429).send('服务繁忙，请稍后再试')
+          return c.status(429).to('服务繁忙，请稍后再试')
       }
 
       await new Promise(async (rv, rj) => {
@@ -665,7 +665,7 @@ Http2Proxy.prototype.mid = function () {
       })
     } catch (err) {
       self.debug && console.error(err||'request null error')
-      c.status(503).send(error_503_text)
+      c.status(503).to(error_503_text)
     } finally {
       session_client = null
     }

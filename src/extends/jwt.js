@@ -208,7 +208,7 @@ class JWT {
       ctx.box.user = r.data
       ctx.user = r.data
 
-      await next()
+      await next(ctx)
     }
   }
 

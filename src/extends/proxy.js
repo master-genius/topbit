@@ -425,9 +425,9 @@ class Proxy {
       
       if (self.hostProxy[host]===undefined || self.hostProxy[host][c.routepath]===undefined) {
         if (self.full) {
-          return c.status(502).send(self.error['502'])
+          return c.status(502).to(self.error['502'])
         }
-        return await next()
+        return await next(c)
       }
 
       let pr = self.getBackend(c, host)
@@ -440,7 +440,7 @@ class Proxy {
         }
 
         if (!pr)
-          return c.status(503).send(self.error['503'])
+          return c.status(503).to(self.error['503'])
       }
 
       let urlobj = self.copyUrlobj(pr.urlobj)
@@ -544,7 +544,7 @@ class Proxy {
     
       }).catch(err => {
         self.debug && console.error(err);
-        c.status(503).send(self.error['503']);
+        c.status(503).to(self.error['503']);
       })
       .finally(() => {
         this.autoClearListeners && h.removeAllListeners && h.removeAllListeners();
