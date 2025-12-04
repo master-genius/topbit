@@ -79,10 +79,14 @@ function fmt_ctx_param(text) {
 const fs = require('fs')
 
 function makeController(name) {
+  let modname = name
+  if (!(/^[A-Z].*/).test(name)) {
+    modname = name.substring(0, 1).toUpperCase() + name.substring(1)
+  }
 
   return `'use strict'\n\n`
         + (simple_mode ? '' : head_hint)
-        + `class ${name} {\n\n`
+        + `class ${modname} {\n\n`
         + `  constructor() {\n`
         + `    //param用于指定最后的路由参数，默认就是/:id\n`
         + `    //若要改变路由，则可以设置此属性，比如设置为/:name\n`
@@ -109,7 +113,7 @@ function makeController(name) {
         + `${fmt_ctx_param('删除资源')}`
         + `  async _delete(ctx) {\n\n`
         + `  }\n`
-        + `}\n\nmodule.exports = ${name}\n`
+        + `}\n\nmodule.exports = ${modname}\n`
         + (simple_mode ? '' : `${type_context}`)
 
 }
@@ -121,7 +125,7 @@ let limitName = [
   'typeof', 'continue', 'fetch', 'globalThis', 'queueMicrotask'
 ]
 
-let name_preg = /^[a-z_][a-z0-9_\-]{0,50}$/i
+let name_preg = /^[A-Za-z_][A-Za-z0-9_\-]{0,50}$/i
 
 function checkName (name) {
   return name_preg.test(name)

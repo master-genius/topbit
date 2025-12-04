@@ -1,4 +1,4 @@
-const titbit = require('../lib/titbit.js');
+const titbit = require('../src/topbit.js');
 const v8 = require('v8');
 const cluster = require('cluster');
 

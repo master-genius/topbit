@@ -1,4 +1,4 @@
-const titbit = require('../lib/titbit.js');
+const titbit = require('../src/topbit.js');
 
 var app = new titbit();
 

@@ -8,10 +8,11 @@
   },
   "bin": {
     "tbload": "bin/loadinfo.sh",
-    "topbit-new-app": "bin/newapp.js"
+    "topbit-new-app": "bin/newapp.js",
+    "new-route": "bin/new-ctl.js"
   },
   "scripts": {
-    "test": "node test/test-service.js",
+    "test": "node test/test-ext.js",
     "test-route": "node test/test-route.js"
   },
   "keywords": [
@@ -47,9 +48,6 @@
   "license": "ISC",
   "author": "BraveWang",
   "type": "commonjs",
-  "scripts": {
-    "test": "echo ok"
-  },
   "dependencies": {
 
   },
