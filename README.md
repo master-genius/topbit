@@ -113,7 +113,7 @@ The first 6 are the most commonly used. For each request type, the router has a 
 
 'use strict'
 
-const Topbit = require('titibit')
+const Topbit = require('topibit')
 
 const app = new Topbit({
   debug: true
@@ -684,7 +684,7 @@ app.use(async (c, next) => {
 
 ## Topbit Complete Flow Chart
 
-![](images/topbit-middleware.png)
+![](images/topbit-middleware.webp)
 
 > **It is important to know that internally, body data reception and parsing are also middleware. The order is deliberately arranged, separating `pre` and `use` interfaces.**
 
