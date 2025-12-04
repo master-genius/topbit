@@ -436,13 +436,13 @@ class TopbitToken {
       let token = c.headers.authorization
 
       if (!token) {
-        return c.status(self.failedCode).send('!token')
+        return c.status(self.failedCode).to('!token')
       }
 
-      let uinfo = self.verify(token)
+      let uinfo = self.verifyAccessToken(token)
 
       if (!uinfo.ok) {
-        return c.status(self.failedCode).send(uinfo.errcode)
+        return c.status(self.failedCode).to(uinfo.errcode)
       }
 
       c.box.user = uinfo
@@ -452,11 +452,10 @@ class TopbitToken {
         c.setHeader('x-refresh-token', new_token)
       }
 
-      await next()
+      await next(c)
     }
   }
 
 }
 
 module.exports = TopbitToken
-

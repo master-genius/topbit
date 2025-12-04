@@ -31,6 +31,9 @@ const Context2 = require('./context2.js');
 const ext = require('./ext.js');
 const TopbitLoader = require('./loader/loader.js')
 const TopbitToken = require('./token/token.js')
+const TopbitExtends = require('./_loadExtends.js')
+const npargv = require('./lib/npargv.js')
+const zipdata = require('./lib/zipdata.js')
 
 let __instance__ = 0;
 
@@ -1287,5 +1290,8 @@ class Topbit {
 
 Topbit.Loader = TopbitLoader;
 Topbit.Token = TopbitToken;
+Topbit.npargv = npargv;
+Topbit.zipdata = zipdata;
+Topbit.extensions = TopbitExtends;
 
 module.exports = Topbit;

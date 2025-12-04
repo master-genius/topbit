@@ -352,4 +352,3 @@ function parseArgv (options = null, obj = null) {
 }
 
 module.exports = parseArgv
-

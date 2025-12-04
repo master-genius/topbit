@@ -6,7 +6,6 @@ const fs = require('fs')
 const fsp = fs.promises
 
 let zipdata = async (pathfile, isData=false) => {
-
   let d
 
   if (isData) {
@@ -44,4 +43,3 @@ zipdata.unzip = async (pathfile, isData = false) => {
 }
 
 module.exports = zipdata
-
