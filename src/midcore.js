@@ -18,7 +18,7 @@ class MidCore {
 
     this.globalKey = `_GLOBAL_0129_${Math.random().toString(16).substring(2)}_`;
 
-    this.midGroup = {};
+    this.midGroup = Object.create(null);
 
     this.midGroup[ this.globalKey ] = [
       async (ctx) => {

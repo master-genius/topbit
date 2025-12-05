@@ -98,7 +98,7 @@ class Monitor {
       } else {
         //此时升温，表示负载高，不要kill多余的进程。
         if (this.cooling < this.maxCooling) {
-          this.cooling += 20 + parseInt( Math.random() * 60 )
+          this.cooling += 20 + ((Math.random() * 60) | 0)
         }
       }
 
