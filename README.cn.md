@@ -1,4 +1,4 @@
-![](images/topbit.png)
+![](images/topbit.webp)
 
 # Topbit
 
