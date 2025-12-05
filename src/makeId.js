@@ -28,7 +28,7 @@ for (let x of loopch) {
 let sloopch = msloopch.slice(0, 100)
 let yloopch = msloopch.slice(36, 500)
 
-msloopch = msloopch.slice(parseInt(Math.random() * 100))
+msloopch = msloopch.slice(Math.floor(Math.random() * 100))
 
 let loopLength = loopch.length
 let sloopLength = sloopch.length
@@ -47,7 +47,7 @@ class Clocks {
 
   rand() {
     for (let k in this.clocks) {
-      this.clocks[k] = parseInt(loopLength * Math.random())
+      this.clocks[k] = (loopLength * Math.random()) | 0
     }
   }
 
@@ -153,7 +153,7 @@ function numId(obj) {
 
 function bigId(obj, a='', b='') {
   let fnum = numId(obj)
-  return (BigInt(fnum) * 1000n + BigInt(parseInt(Math.random() * 1000))).toString()
+  return (BigInt(fnum) * 1000n + BigInt((Math.random() * 1000)|0)).toString()
 }
 
 Object.defineProperty(makeId, 'numId', {
@@ -161,7 +161,7 @@ Object.defineProperty(makeId, 'numId', {
   configurable: false,
   get: function () {
     let oo = {
-      endnum: parseInt(Math.random() * 2000)
+      endnum: (Math.random() * 2000) | 0
     }
 
     return numId.bind(null, oo)
@@ -173,7 +173,7 @@ Object.defineProperty(makeId, 'bigId', {
   configurable: false,
   get: function () {
     let oo = {
-      endnum: parseInt(Math.random() * 2000)
+      endnum: (Math.random() * 2000) | 0
     }
 
     return bigId.bind(null, oo)

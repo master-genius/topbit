@@ -41,7 +41,7 @@ ext.makeName = function(filename = '') {
   let orgname = `${tm.getFullYear()}-${fmtbits(tm.getMonth()+1)}-${fmtbits(tm.getDate())}_`
       + `${fmtbits(tm.getHours())}-${fmtbits(tm.getMinutes())}-${fmtbits(tm.getSeconds())}`
       + `_${tm.getMilliseconds()}`
-      + `${parseInt(Math.random() * 1000) + 1}${parseInt(Math.random() * 100000) + 10000}`
+      + `${((Math.random() * 1000)|0) + 1}${((Math.random() * 100000)|0) + 10000}`
   
   if (filename) return (orgname + ext.extName(filename))
 
@@ -183,14 +183,26 @@ Object.defineProperty(ext, 'algorithm', {
  *key 必须是32位
  * */
 ext.aesEncrypt = function (data, key, encoding = 'base64url') {
-  var h = crypto.createCipheriv(__aag, key, __aesIV)
+  let iv = randstring(16)
+  let h = crypto.createCipheriv(__aag, key, iv)
   let hd = h.update(data, 'utf8', encoding)
   hd += h.final(encoding)
-  return hd
+  return [iv, hd]
 }
 
-ext.aesDecrypt = function (data, key, encoding = 'base64url') {
-  var h = crypto.createDecipheriv(__aag, key, __aesIV)
+ext.aesDecrypt = function (org_data, key, encoding = 'base64url') {
+  if (!org_data) throw new Error('data is wrong');
+  
+  let data, iv
+
+  if (Array.isArray(org_data)) {
+    [iv, data] = org_data
+  } else {
+    iv = org_data.iv
+    data = org_data.data
+  }
+
+  let h = crypto.createDecipheriv(__aag, key, iv)
   let hd = h.update(data, encoding, 'utf8')
   hd += h.final('utf8')
   return hd
@@ -259,7 +271,7 @@ ext.timestr = function (m = 'long') {
 
 ext.nrand = function (f, t) {
   let discount = t - f
-  return parseInt((Math.random() * discount) + f)
+  return Math.floor((Math.random() * discount) + f))
 }
 
 let uuidSerial = makeId.serialId

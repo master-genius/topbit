@@ -55,5 +55,5 @@ app.post('/upload', async c => {
     }
 }, '@upload');
 
-app.daemon(1990, 2);
+app.daemon(1990, 3);
 

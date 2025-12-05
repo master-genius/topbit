@@ -2,26 +2,7 @@
 
 const crypto = require('node:crypto')
 const {Buffer} = require('node:buffer')
-
-let _randstrList = [
-  'a', 'b', 'c', 'd', 'e', 'f', 'g',
-  'h', 'i', 'j', 'k', 'l', 'm', 'n',
-  'o', 'p', 'q', 'r', 's', 't', 'u',
-  'v', 'w', 'x', 'y', 'z',
-
-  '1', '2', '3', '4', '5', '6', '7', '8', '9'
-]
-
-function randstring(length = 8) {
-  let rstr = ''
-  let ind = 0
-
-  for (let i = 0; i < length; i++) {
-    ind = parseInt(Math.random() * _randstrList.length)
-    rstr += _randstrList[ind]
-  }
-  return rstr
-}
+const randstring = require('../randstring.js')
 
 class TopbitToken {
 
@@ -116,7 +97,7 @@ class TopbitToken {
 
   }
 
-  _aesEncrypt(data, key, iv, options = {}) {
+  aesEncrypt(data, key, iv, options = {}) {
     let h = crypto.createCipheriv(this.algorithm, key, iv, options)
     let hd = h.update(data, 'utf8')
     let final_data = h.final()
@@ -127,7 +108,7 @@ class TopbitToken {
     return Buffer.concat([hd, final_data, authtag])
   }
 
-  _aesDecrypt(data, key, iv, options = {}) {
+  aesDecrypt(data, key, iv, options = {}) {
     let h = crypto.createDecipheriv(this.algorithm, key, iv, options)
     if (this.isGCM) {
       let bdata = Buffer.from(data, this.tokenEncoding)
@@ -255,7 +236,7 @@ class TopbitToken {
       return ''
     }
 
-    let ind = parseInt( Math.random() * this.tokenIds.length)
+    let ind = (Math.random() * this.tokenIds.length) | 0
 
     return this.tokenIds[ind]
   }
@@ -292,7 +273,7 @@ class TopbitToken {
 
   setRefresh(flag = true) {
     if (flag) {
-      this.refresh = parseInt(this.expires / 5)
+      this.refresh = Math.floor(this.expires / 5)
     } else {
       this.refresh = 0
     }
@@ -325,9 +306,9 @@ class TopbitToken {
     let ikv = tokenId ? this.idKeyIV.get(tokenId) : null
 
     if (tokenId && ikv) {
-      tk = this._aesEncrypt(JSON.stringify(userinfo), ikv.key, ikv.iv)
+      tk = this.aesEncrypt(JSON.stringify(userinfo), ikv.key, ikv.iv)
     } else {
-      tk = this._aesEncrypt(JSON.stringify(userinfo), this.key, this.iv)
+      tk = this.aesEncrypt(JSON.stringify(userinfo), this.key, this.iv)
     }
 
     return tk.toString(this.tokenEncoding)
@@ -375,7 +356,7 @@ class TopbitToken {
     userinfo.timestamp = Date.now()
     userinfo.__tokenId__ = ikv.id
 
-    let tk = this._aesEncrypt(JSON.stringify(userinfo), ikv.key, ikv.iv)
+    let tk = this.aesEncrypt(JSON.stringify(userinfo), ikv.key, ikv.iv)
 
     return tk.toString(this.tokenEncoding)
   }
@@ -394,7 +375,7 @@ class TopbitToken {
 
   verify(edata, ikv={}) {
     try {
-      let u = this._aesDecrypt(edata, ikv.key || this.key, ikv.iv || this.iv)
+      let u = this.aesDecrypt(edata, ikv.key || this.key, ikv.iv || this.iv)
       let uj = JSON.parse(u)
       let tm = Date.now()
 

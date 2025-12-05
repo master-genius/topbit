@@ -457,18 +457,14 @@ class Topbit {
     this.topmem = 4345036800;
   
     if (this.topmem >= this.totalmem) {
-      this.topmem = parseInt(this.totalmem * 0.9);
+      this.topmem = Math.floor(this.totalmem * 0.9);
     }
 
     this.secure = {
       //而超过diemem则直接kill 这限制的是对heap的使用
-      //parseInt(this.topmem * (0.5 + this.config.memFactor) )
       diemem : this.topmem,
-  
-      //parseInt(this.topmem * (0.5 + this.config.memFactor) )
-      maxmem : parseInt(this.topmem * (0.5 + this.config.memFactor)),
-  
-      maxrss : parseInt(this.totalmem * (0.52 + this.config.memFactor) )
+      maxmem : Math.floor(this.topmem * (0.5 + this.config.memFactor)),
+      maxrss : Math.floor(this.totalmem * (0.52 + this.config.memFactor) )
     };
     
     //运行时服务，需要在全局添加一些服务插件可以放在此处。
@@ -1226,7 +1222,7 @@ class Topbit {
       //根据num设定secure的内存限制。
       if (num > 1) {
         for (let k in this.secure) {
-          this.secure[k] = parseInt(this.secure[k] * (0.45 + 1 / num));
+          this.secure[k] = Math.floor(this.secure[k] * (0.56 + 1 / num));
         }
       }
 
