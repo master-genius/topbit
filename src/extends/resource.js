@@ -289,6 +289,10 @@ class Resource {
         }
       }
 
+      if (real_path.indexOf('/../') >= 0) {
+        return c.status(404).to('file not found')
+      }
+
       let pathfile = `${self.staticPath}${self.prepath}${real_path}`
   
       if (self.cache.has(real_path)) {

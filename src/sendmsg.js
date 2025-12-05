@@ -13,15 +13,15 @@ module.exports = (type, msg, options = {autoExit: false}) => {
       process.send({
         type: type,
         message: msg
-      });
+      })
     }
 
     if (options.autoExit) {
-      process.exit(options.exitCode || 0);
+      process.exit(options.exitCode || 0)
     }
 
   } catch (err) {
 
   }
 
-};
+}
