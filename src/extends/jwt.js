@@ -22,7 +22,7 @@
  * 
  */
 
-const randstring = require('./__randstring.js')
+const randstring = require('../randstring.js')
 
 const crypto = require('node:crypto')
 

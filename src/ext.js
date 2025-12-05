@@ -271,7 +271,7 @@ ext.timestr = function (m = 'long') {
 
 ext.nrand = function (f, t) {
   let discount = t - f
-  return Math.floor((Math.random() * discount) + f))
+  return Math.floor((Math.random() * discount) + f)
 }
 
 let uuidSerial = makeId.serialId

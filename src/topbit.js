@@ -34,6 +34,7 @@ const TopbitToken = require('./token/token.js')
 const TopbitExtends = require('./_loadExtends.js')
 const npargv = require('./lib/npargv.js')
 const zipdata = require('./lib/zipdata.js')
+const ErrorLog = require('./lib/errorlog.js')
 
 let __instance__ = 0;
 
@@ -1284,6 +1285,7 @@ Topbit.Loader = TopbitLoader;
 Topbit.Token = TopbitToken;
 Topbit.npargv = npargv;
 Topbit.zipdata = zipdata;
+Topbit.ErrorLog = ErrorLog;
 Topbit.extensions = TopbitExtends;
 
 module.exports = Topbit;

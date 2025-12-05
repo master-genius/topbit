@@ -32,7 +32,7 @@ class Session {
 
     this.prefix = 'titbit_sess_'
 
-    this.sessionKey = 'TITBIT_SESSID'
+    this.sessionKey = 'TOPBIT_SESSID'
 
     this.error = null
 

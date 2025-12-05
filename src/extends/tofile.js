@@ -24,7 +24,7 @@ function makeName(filename = '') {
 
   let orgname = `${tm.getFullYear()}-${fmtbits(tm.getMonth()+1)}-${fmtbits(tm.getDate())}_`
       + `${fmtbits(tm.getHours())}-${fmtbits(tm.getMinutes())}-${fmtbits(tm.getSeconds())}`
-      + `_${tm.getMilliseconds()}${parseInt(Math.random() * 1000) + 1}${parseInt(Math.random() * 100000) + 10000}`
+      + `_${tm.getMilliseconds()}${((Math.random() * 1000)|0) + 1}${((Math.random() * 100000)|0) + 10000}`
 
   if (filename) return (orgname + extName(filename))
 

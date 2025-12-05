@@ -170,7 +170,7 @@ class Cors {
             if (lastSlash < host.length - 1) host = host.substring(0, lastSlash+1);
             if (!host.trim()) continue;
 
-            midIndex = parseInt(host.length / 2);
+            midIndex = ((host.length / 2)|0);
             midChar = host[midIndex];
 
             this.allowTable[host] = {

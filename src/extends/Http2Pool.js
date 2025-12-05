@@ -24,7 +24,7 @@ class Http2Pool {
     this.connectTimeout = options.connectTimeout || 15000
 
     this.max = (options.max && !isNaN(options.max) && options.max > 0) ? options.max : 50
-    this.poolMax = parseInt(this.max * 1.5 + 0.5)
+    this.poolMax = Math.floor(this.max * 1.5 + 0.5)
     this.maxConnect = (options.maxConnect && !isNaN(options.maxConnect) && options.maxConnect > 0)
                       ? options.maxConnect
                       : this.poolMax + 500
@@ -129,7 +129,7 @@ class Http2Pool {
             if (this.failedCount < 10) {
               this.innerConnectDelay = this.failedCount
             } if (this.failedCount < 60000) {
-              this.innerConnectDelay = parseInt(this.failedCount / 10)
+              this.innerConnectDelay = Math.floor(this.failedCount / 10)
             } else { this.innerConnectDelay = 6000 }
 
             !rejected && (rejected = true) && reject(err)

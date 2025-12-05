@@ -80,7 +80,7 @@ class Resource {
 
     this.prepath = ''
     
-    this.routeGroup = `__static_${parseInt(Math.random()*10000)}_`
+    this.routeGroup = `__static_${Math.floor(Math.random() * 10000)}_`
 
     this.decodePath = false
 
@@ -366,7 +366,7 @@ class Resource {
 
         if (self.cacheFailed >= self.failedLimit) {
           //以{self.prob}%概率决定是否释放缓存。
-          if (parseInt(Math.random() * 100) < self.prob) {
+          if (((Math.random() * 100) | 0) < self.prob) {
             self.clearCache()
           }
 
