@@ -16,7 +16,7 @@ class MidCore {
       };
     }
 
-    this.globalKey = `_GLOBAL_0129_${Math.random().toString(16).substring(2)}_`;
+    this.globalKey = `_GLOBAL_0129_${Math.random().toString(16).substring(2).substring(0,6)}_`;
 
     this.midGroup = Object.create(null);
 
