@@ -1,6 +1,6 @@
 'use strict'
 
-class Api {
+class Test {
   constructor() {
 
   }
@@ -11,17 +11,17 @@ class Api {
     ])
   }
 
-   __mid() {
+  __mid() {
     return [
       {
         middleware: async (ctx, next) => {
-          console.log(`api ${ctx.method} start`)
+          console.log(`test ${ctx.method} start`)
           await next(ctx)
-          console.log(`api ${ctx.method} end`)
+          console.log(`test ${ctx.method} end`)
         }
       }
     ]
   }
 }
 
-module.exports = Api
+module.exports = Test

@@ -7,7 +7,7 @@ let {Loader} = Topbit
 
 let app = new Topbit({
   debug: true,
-  //loadInfoFile: '--mem',
+  loadInfoFile: '--mem',
 })
 
 if (app.isWorker) {
@@ -22,6 +22,8 @@ if (app.isWorker) {
 
 app.sched('none')
 
-app.autoWorker(3)
+app.autoWorker(12)
 
-app.daemon(1234, 1)
+app.daemon(1234, 5)
+
+//console.log(app.midware.midGroup)
