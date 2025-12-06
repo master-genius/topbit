@@ -426,10 +426,10 @@ class TopbitToken {
         return c.status(self.failedCode).to(uinfo.errcode)
       }
 
-      c.box.user = uinfo
+      c.user = uinfo
 
       if (uinfo.data.expires + uinfo.data.timestamp - uinfo.now < self.refresh) {
-        let new_token = self.make(uinfo.data, uinfo.data.__tokenId__)
+        let new_token = self.makeToken(uinfo.data, uinfo.data.__tokenId__)
         c.setHeader('x-refresh-token', new_token)
       }
 
