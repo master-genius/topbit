@@ -11,6 +11,6 @@
 
 ## English Document
 
-[TopbitLoader](./topbit-loader.md)
+[TopbitLoader](./en/topbit-loader.md)
 
-[TopbitToken](./topbit-token.md)
+[TopbitToken](./en/topbit-token.md)
