@@ -2,7 +2,7 @@
 
 # Topbit
 
-[中文文档](README.cn.md)
+#### [🪭 中文文档 ☯️](README.cn.md)
 
 Topbit is a server-side Web framework based on Node.js. It has no third-party dependencies and is optimized for extreme performance with a unique routing and middleware grouping execution mechanism.
 
