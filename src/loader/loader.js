@@ -3,12 +3,6 @@
 const fs = require('node:fs');
 const process = require('node:process');
 
-/**
- * 全局中间件容易因为group选项引发问题，若要把加载的controller目录隔离出来，需要针对每个分组加载中间件。
- * 就是在全局中间件不指定group的情况下，默认是所有group而不是全局。
- * 这样对前缀支持也可以完全兼容。
- */
-
 let outWarning = (text, errname = 'Warning', color = '\x1b[2;31;47m') => {
   setTimeout(() => {
     console.error(`${color} ${errname}: ${text} \x1b[0m\n`);
@@ -16,32 +10,10 @@ let outWarning = (text, errname = 'Warning', color = '\x1b[2;31;47m') => {
 };
 
 let nameErrorInfo = '名称不能有空格换行特殊字符等，仅支持 字母 数字 减号 下划线，字母开头。';
-  
-//获取模型文件列表
-function getModelFiles(filepath) {
-  let mlist = fs.readdirSync(filepath, { withFileTypes: true });
-
-  let rlist = [];
-
-  for (let i=0; i < mlist.length; i++) {
-    if (!mlist[i].isFile()) continue;
-
-    if (mlist[i].name.substring(mlist[i].name.length-3) !== '.js')
-      continue;
-
-    if (mlist[i].name[0] === '!' || mlist[i].name[0] === '_')
-      continue;
-
-    rlist.push(mlist[i].name);
-  }
-
-  return rlist;
-}
 
 class TopbitLoader {
 
   constructor(options = {}) {
-    //let appDir = __dirname + '.';
     let appDir = '.';
     
     this.globalMidTable = [];
@@ -63,73 +35,49 @@ class TopbitLoader {
     this.optionsCacheLog = null;
 
     this.methodNumber = {
-      get: 1,
-      post: 2,
-      put: 3,
-      delete: 4,
-      _delete: 4,
-      options: 5,
-      head: 6,
-      trace: 7,
-      patch: 8,
-      list: 9
+      get: 1, post: 2, put: 3, delete: 4, _delete: 4,
+      options: 5, head: 6, trace: 7, patch: 8, list: 9
     }
 
     this.config = {
-      //当作为模块引入时，根据路径关系，
-      //可能的位置是node_modules/titbit-loader/loader.js，
-      //所以默认在父级目录两层和node_modules同级。
       appPath     : appDir,
-      controllerPath  : appDir+'/controller',
-      modelPath     : appDir+'/model',
-      midwarePath   : appDir+'/middleware',
-      loadModel     : true,
+      controllerPath  : appDir + '/controller',
+      midwarePath   : appDir + '/middleware',
 
       deep : 1,
-      mname : null,
-
-      modelNamePre: '',
-
-      //如果作为数组则会去加载指定的子目录
+      // 如果作为数组则会去加载指定的子目录
       subgroup : null,
-
       prePath: '',
-
       homeFile: '',
-
+      
+      // 控制器初始化参数，默认为 app.service
       initArgs: null,
 
       multi: false,
-
       optionsRoute: true,
-
       fileAsGroup: true,
       
       beforeController: null,
-      afterController: null
+      afterController: null,
+
+      // 新的核心：模型加载钩子函数
+      modelLoader: null
     };
 
-    //用于在fileAsGroup模式，为options添加的分组避免和文件的分组冲突。
-    //考虑这样的情况：controller目录中存在 xyz.js文件和xyz目录。
+    // 用于在fileAsGroup模式，为options添加的分组避免和文件的分组冲突。
     this.groupTag = '@';
 
-    //组中间件的缓存，用于fileAsGroup的操作。
+    // 组中间件的缓存
     this.groupCache = {};
     this.globalCache = [];
-
-    //在加载Model时可能需要传递参数
-    this.mdb = null;
-    this.mdbMap = null;
 
     this.routepreg = /^[a-z\d\-\_]+$/i;
 
     for (let k in options) {
-      
       if (k == 'appPath') continue;
 
       if (k === 'subgroup') {
         if (typeof options[k] === 'string') options[k] = [ options[k] ];
-
         if (options[k] instanceof Array) {
           this.config.subgroup = options[k];
         }
@@ -144,6 +92,7 @@ class TopbitLoader {
       switch (k) {
         case 'beforeController':
         case 'afterController':
+        case 'modelLoader': // 仅保留这个与 Model 相关的配置
           if (typeof options[k] === 'function') this.config[k] = options[k];
           break;
 
@@ -152,15 +101,9 @@ class TopbitLoader {
           break;
 
         case 'homeFile':
-        case 'modelNamePre':
           ;(typeof options[k] === 'string') && (this.config[k] = options[k]);
           break;
 
-        case 'mname':
-          ;(typeof options[k] === 'string' || typeof options[k] === 'symbol') && (this.config[k] = options[k]);
-          break;
-
-        case 'loadModel':
         case 'multi':
         case 'optionsRoute':
         case 'fileAsGroup':
@@ -168,7 +111,6 @@ class TopbitLoader {
           break;
 
         case 'controllerPath':
-        case 'modelPath':
         case 'midwarePath':
           if (options[k][0] !== '/') {
             this.config[k] = `${this.config.appPath}/${options[k]}`;
@@ -179,6 +121,7 @@ class TopbitLoader {
       }
     }
 
+    // 仅检查 controller 和 middleware 目录
     try {
       fs.accessSync(this.config.controllerPath, fs.constants.F_OK);
     } catch (err) {
@@ -194,42 +137,20 @@ class TopbitLoader {
         fs.mkdirSync(this.config.midwarePath);
       }
     }
-
-    try {
-      fs.accessSync(this.config.modelPath, fs.constants.F_OK);
-    } catch (err) {
-      if (this.config.modelPath.length > 0) {
-        fs.mkdirSync(this.config.modelPath);
-      }
-    }
-
-    if (options.mdb !== undefined && this.config.loadModel) {
-      this.mdb = options.mdb;
-    }
-
-    options.mdbMap && (this.mdbMap = options.mdbMap); 
   }
 
   fmtPrePath() {
     let prepath = this.config.prePath.trim().replace(/\/+/g, '/');
-    if (prepath === '/')
-      prepath = '';
+    if (prepath === '/') prepath = '';
     else if (prepath.length > 0) {
-      if (prepath[0] !== '/') {
-        prepath = `/${prepath}`;
-      }
-      if (prepath[ prepath.length - 1 ] === '/') {
-        prepath = prepath.substring(0, prepath.length - 1);
-      }
+      if (prepath[0] !== '/') prepath = `/${prepath}`;
+      if (prepath[ prepath.length - 1 ] === '/') prepath = prepath.substring(0, prepath.length - 1);
     }
-
     this.config.prePath = prepath;
   }
 
   _fmtSubGroup() {
-    if (!(this.config.subgroup instanceof Array)) {
-      return;
-    }
+    if (!(this.config.subgroup instanceof Array)) return;
     let a;
     for (let i = 0; i < this.config.subgroup.length; i++) {
       a = this.config.subgroup[i];
@@ -238,19 +159,39 @@ class TopbitLoader {
     }
   }
 
-  init(app) {
-    this.config.loadModel && this.loadModel(app);
-    this.mdbMap && this.loadModelMap(app);
-    this.defineServiceFunction(app);
+  /**
+   * 初始化入口 (Async)
+   */
+  async init(app) {
+    // 注入应用基础信息到 service，供 Controller 或 Model 使用
+    Object.defineProperties(app.service, {
+      __prepath__: {
+        value: this.config.prePath,
+        configurable: false, writable: false, enumerable: false
+      },
+      __appdir__: {
+        value: this.config.appPath,
+        configurable: false, writable: false, enumerable: false
+      }
+    });
 
+    // 1. 执行模型加载钩子 (如果存在)
+    if (this.config.modelLoader) {
+      await this.config.modelLoader(app.service);
+    }
+
+    // 2. 加载控制器 (路由)
     this.loadController(app);
+
+    // 3. 加载中间件
     this.loadMidware(app);
-    app.service.__titbit_loader__ = true;
+    
+    app.service.__topbit_loader__ = true;
   }
 
   loadController(app) {
-    if (app.service.__titbit_loader__ && !this.config.multi) {
-      outWarning('您已经使用titbit-loader加载过路由，多次加载容易导致路由冲突，重复操作将会被终止。');
+    if (app.service.__topbit_loader__ && !this.config.multi) {
+      outWarning('您已经使用topbit-loader加载过路由，多次加载容易导致路由冲突，重复操作将会被终止。');
       outWarning('若有需要，可设置选项multi为true允许多次加载。', '  提示');
       return false;
     }
@@ -261,6 +202,10 @@ class TopbitLoader {
     this.readControllers(this.config.controllerPath, cfiles);
     let cob = null;
     let Ctlr;
+    
+    // 默认注入 app.service
+    const initArg = this.config.initArgs || app.service;
+
     for (let k in cfiles) {
       try {
         Ctlr = require(k);
@@ -272,7 +217,7 @@ class TopbitLoader {
         cob = new Ctlr();
 
         if (cob.init && typeof cob.init === 'function') {
-          cob.init(this.config.initArgs || app.service);
+          cob.init(initArg);
         }
         
         if (this.config.beforeController) {
@@ -333,112 +278,69 @@ class TopbitLoader {
     let routeParam = '/:id';
 
     if (cob.param !== undefined && cob.param !== null && typeof cob.param === 'string') {
-      routeParam = cob.param.trim()
-                            .replace(/\s+/g, '')
-                            .replace(/\/{2,}/g, '/');
+      routeParam = cob.param.trim().replace(/\s+/g, '').replace(/\/{2,}/g, '/');
       if (routeParam.length > 0 && routeParam[0] !== '/') {
         routeParam = `/${routeParam}`;
       }
     }
 
     Object.defineProperty(cob, '__route__', {
-      configurable: false,
-      writable: false,
-      enumerable: false,
+      configurable: false, writable: false, enumerable: false,
       value: route_path
     });
 
-    if (cob.post !== undefined && typeof cob.post === 'function') {
+    // 辅助函数：简化路由注册
+    const bindRoute = (method, suffix, fnName, typeName) => {
+        app.router[method](`${route_path}${suffix}`, cob[fnName].bind(cob), {
+            name: `${npre}/${typeName}`,
+            group: group
+        });
+    };
+
+    if (cob.post && typeof cob.post === 'function') {
       let postParam = (cob.postParam && typeof cob.postParam === 'string') ? cob.postParam : '';
-      
       postParam = postParam.replace(/\/+/g, '/');
-
       if (postParam === '/') postParam = '';
-
-      if (postParam.length > 0 && postParam[0] !== '/') {
-        postParam = `/${postParam}`;
-      }
-
-      app.router.post(`${route_path}${postParam}`, cob.post.bind(cob),
-        {
-          name: `${npre}/${this.methodNumber.post}`,
-          group: group
-        }
-      );
-
+      if (postParam.length > 0 && postParam[0] !== '/') postParam = `/${postParam}`;
+      
+      bindRoute('post', postParam, 'post', this.methodNumber.post);
     }
 
     let real_delete_method = '';
-    if (cob.delete && typeof cob.delete === 'function') {
-      real_delete_method = 'delete';
-    } else if (cob._delete && typeof cob._delete === 'function') {
-      real_delete_method = '_delete';
-    }
+    if (cob.delete && typeof cob.delete === 'function') real_delete_method = 'delete';
+    else if (cob._delete && typeof cob._delete === 'function') real_delete_method = '_delete';
 
     if (real_delete_method) {
-      app.router.delete(`${route_path}${routeParam}`,
-        cob[real_delete_method].bind(cob),
-        {
-          name: `${npre}/${this.methodNumber.delete}`,
-          group: group
-        }
-      );
+        bindRoute('delete', routeParam, real_delete_method, this.methodNumber.delete);
     }
 
-    if (cob.put !== undefined && typeof cob.put === 'function') {
-      app.router.put(`${route_path}${routeParam}`, cob.put.bind(cob),
-        {
-          name: `${npre}/${this.methodNumber.put}`,
-          group: group
-        }
-      );
+    if (cob.put && typeof cob.put === 'function') {
+        bindRoute('put', routeParam, 'put', this.methodNumber.put);
     }
 
-    if (cob.get !== undefined && typeof cob.get === 'function') {
-      app.router.get(`${route_path}${routeParam}`, cob.get.bind(cob),
-        {
-          name: `${npre}/${this.methodNumber.get}`,
-          group: group
+    if (cob.get && typeof cob.get === 'function') {
+        bindRoute('get', routeParam, 'get', this.methodNumber.get);
+        // 主页路由
+        if (this.config.homeFile === cf.pathname) {
+            app.router.get('/', cob.get.bind(cob), { name: 'home', group: group });
         }
-      );
-      //主页只支持GET请求
-      if (this.config.homeFile === cf.pathname) {
-        app.router.get('/', cob.get.bind(cob), {
-          name: 'home',
-          group: group
-        });
-      }
     }
 
-    if (cob.list !== undefined && typeof cob.list === 'function') {
+    if (cob.list && typeof cob.list === 'function') {
       let listParam = (cob.listParam && typeof cob.listParam === 'string') ? cob.listParam : '';
-      
       listParam = listParam.replace(/\/+/g, '/');
-
       if (listParam === '/') listParam = '';
-
-      if (listParam.length > 0 && listParam[0] !== '/') {
-        listParam = `/${listParam}`;
-      }
-
-      app.router.get(`${route_path}${listParam}`, cob.list.bind(cob),{
-        name: `${npre}/${this.methodNumber.list}`,
-        group: group
-      });
+      if (listParam.length > 0 && listParam[0] !== '/') listParam = `/${listParam}`;
+      
+      bindRoute('get', listParam, 'list', this.methodNumber.list);
     }
 
-    if (cob.patch !== undefined && typeof cob.patch === 'function') {
-      app.router.patch(`${route_path}${routeParam}`, cob.patch.bind(cob),{
-        name: `${npre}/${this.methodNumber.patch}`,
-        group: group
-      });
+    if (cob.patch && typeof cob.patch === 'function') {
+        bindRoute('patch', routeParam, 'patch', this.methodNumber.patch);
     }
 
-    if (cob.options !== undefined && typeof cob.options === 'function') {
-      app.router.options(`${route_path}${routeParam}`, cob.options.bind(cob),{
-        name: `${npre}/${this.methodNumber.options}`,
-        group: group
-      });
+    if (cob.options && typeof cob.options === 'function') {
+        bindRoute('options', routeParam, 'options', this.methodNumber.options);
     } else if (this.config.optionsRoute) {
       let real_group = this.config.fileAsGroup ? dirgroup : group;
       let tag = this.config.fileAsGroup ? this.groupTag : '';
@@ -451,11 +353,8 @@ class TopbitLoader {
       }
     }
 
-    if (cob.head !== undefined && typeof cob.head === 'function') {
-      app.router.head(`${route_path}${routeParam}`, cob.head.bind(cob),{
-        name: `${npre}/${this.methodNumber.head}`,
-        group: group
-      });
+    if (cob.head && typeof cob.head === 'function') {
+        bindRoute('head', routeParam, 'head', this.methodNumber.head);
     }
 
     this.fileMidTable[cf.filegroup] = {
@@ -496,15 +395,10 @@ class TopbitLoader {
   }
 
   /**
-   * 加载中间件，仅仅是通过一个js文件，
-   * 中间件不宜过度使用，否则容易混乱。
+   * 加载中间件
    */
   loadMidware(app) {
-    if (app.service.__titbit_loader__ && !this.config.multi) {
-      outWarning('您已经使用titbit-loader加载过中间件，多个实例容易会导致中间件多次加载或冲突，重复操作将会被终止。');
-      outWarning('若有需要，可设置选项multi为true允许多次加载。', '  提示');
-      return false;
-    }
+    if (app.service.__topbit_loader__ && !this.config.multi) return;
 
     this._getGroupList();
 
@@ -564,19 +458,9 @@ class TopbitLoader {
 
   checkMiddleware(m) {
     if (m.middleware === undefined) return false;
-
-    if (typeof m.middleware === 'function' && m.middleware.constructor.name === 'AsyncFunction') {
-      return true;
-    }
-
-    if (m.middleware.mid && typeof m.middleware.mid === 'function') {
-      return true;
-    }
-
-    if (m.middleware.middleware && typeof m.middleware.middleware === 'function') {
-      return true;
-    }
-
+    if (typeof m.middleware === 'function' && m.middleware.constructor.name === 'AsyncFunction') return true;
+    if (m.middleware.mid && typeof m.middleware.mid === 'function') return true;
+    if (m.middleware.middleware && typeof m.middleware.middleware === 'function') return true;
     return false;
   }
 
@@ -619,43 +503,27 @@ class TopbitLoader {
         }
         return false;
       } else if (m.mode === 'online' || m.mode === 'product') {
-        //只在正式环境加载
         if (app.service.TEST || app.service.DEV) {
-          //console.log(`测试环境不加载中间件`, m);
           return false;
         }
         return true;
       }
     }
-    //console.log('加载···', m);
     return true;
   }
 
   loadGlobalMidware(app, m) {
-    //检测是否是开发环境，并确定是否加载中间件。
-    if (this._checkMidwareMode(app, m) === false) {
-      return;
-    }
+    if (this._checkMidwareMode(app, m) === false) return;
     
-    let opts = null;
-
     let makeOpts = (groupname = null) => {
       let op = {};
-      if (m.method !== undefined) {
-        op.method = m.method;
-      }
-      if (groupname) {
-        op.group = groupname[0] === '/' ? groupname : `/${groupname}`;
-      }
-
-      if (m.pre) {
-        op.pre = true;
-      }
+      if (m.method !== undefined) op.method = m.method;
+      if (groupname) op.group = groupname[0] === '/' ? groupname : `/${groupname}`;
+      if (m.pre) op.pre = true;
       return op;
     };
 
     let mobj;
-
     let group = this.groupList;
 
     if (group) {
@@ -668,30 +536,18 @@ class TopbitLoader {
       for (let g of group) {
         mobj && app.use(mobj, makeOpts(g));
       }
-
       return;
     }
-
   }
 
   loadGroupMidware(app, m, group) {
-    
-    if (this._checkMidwareMode(app, m) === false) {
-      return;
-    }
-
-    if ((!m.name || m.name === '') && !m.middleware) {
-      return;
-    }
+    if (this._checkMidwareMode(app, m) === false) return;
+    if ((!m.name || m.name === '') && !m.middleware) return;
     let opts = {
       group: `${this.config.prePath}${group}`,
     };
-    if (m.method !== undefined) {
-      opts.method = m.method;
-    }
-    if (m.pre) {
-      opts.pre = true;
-    }
+    if (m.method !== undefined) opts.method = m.method;
+    if (m.pre) opts.pre = true;
 
     let mobj = this.getMidwareInstance(m);
     if (mobj) {
@@ -704,23 +560,10 @@ class TopbitLoader {
     }
   }
 
-  /**
-   * 
-   * @param {object} app 
-   * @param {object} m 
-   * @param {string} f 
-   * @param {string} group 包括前缀的分组，若开启fileAsGroup则为filegroup
-   * @param {string} dirgroup 文件名，不包括前缀
-   * @returns 
-   */
   loadFileMidware(app, m, f, group, dirgroup) {
-    if (this._checkMidwareMode(app, m) === false) {
-      return;
-    }
+    if (this._checkMidwareMode(app, m) === false) return;
 
-    //group已经带有prepath前缀。
     let opts = { group };
-
     f = `${this.config.prePath}${f}`;
 
     if (!this.fileAsGroup && m.path === undefined) {
@@ -730,9 +573,7 @@ class TopbitLoader {
       ];
     }
 
-    if (m.path && typeof m.path === 'string') {
-      m.path = [ m.path ];
-    }
+    if (m.path && typeof m.path === 'string') m.path = [ m.path ];
 
     if (m.path && Array.isArray(m.path)) {
       opts.name = [];
@@ -740,168 +581,13 @@ class TopbitLoader {
       for (let p of m.path) {
         path_num = this.methodNumber[p.toLowerCase()];
         if (path_num === undefined) continue;
-
         opts.name.push(`${f}/${path_num}`);
       }
     }
 
-    if (m.pre) {
-      opts.pre = true;
-    }
-
+    if (m.pre) opts.pre = true;
     let mobj = this.getMidwareInstance(m);
-    if (mobj) {
-      app.use(mobj, opts);
-    }
-  }
-
-  loadModelMap(app) {
-    if (typeof this.mdbMap !== 'object')
-      throw new Error('mdbMap必须是object类型。');
-
-    let defpath = this.config.modelPath;
-    let sk;
-    let curpath;
-    let obj;
-
-    let loadObj = (serv, odb, fpath) => {
-      let mlist = getModelFiles(fpath);
-      let mname;
-      mlist.forEach(m => {
-        mname = m.substring(0, m.length - 3);
-        serv[mname] = this.getModelInstance(fpath + '/' + m, odb);
-      });
-    };
-    for (let k in this.mdbMap) {
-      obj = this.mdbMap[k];
-      if (!obj || typeof obj !== 'object') continue;
-
-      sk = '@' + k;
-      if (!app.service[sk]) app.service[sk] = {};
-      curpath = obj.path || defpath;
-
-      loadObj(app.service[sk], obj.mdb || null, curpath);
-    }
-
-  }
-
-  defineServiceFunction(app) {
-    if (app.service.getModel) return;
-    
-    let sfe = function (mk, mpre, name, key = '') {
-      let m;
-      if (!key) {
-        m = mk ? this[mk] : this;
-        let oo = m[mpre + name];
-        if (!oo) throw new Error(`无法获取模型实例${name}`);
-        return oo;
-      }
-
-      let k = '@' + key;
-      if (!this[k] || !this[k][name]) throw new Error(`无法获取模型实例${name}`);
-      return this[k][name];
-    };
-
-    app.service.getModel = sfe.bind(app.service, this.config.mname, this.config.modelNamePre);
-
-    let fm = function (key) {
-      let k = '@' + key;
-      if (!this[k]) throw new Error('无法获取服务容器 ' + key);
-      return this[k];
-    };
-
-    app.service.modelMap = fm.bind(app.service);
-
-    Object.defineProperties(app.service, {
-      __prepath__: {
-        value: this.config.prePath,
-        configurable: false,
-        writable: false,
-        enumerable: false
-      },
-
-      __appdir__: {
-        value: this.config.appPath,
-        configurable: false,
-        writable: false,
-        enumerable: false
-      }
-    });
-
-  }
-
-  bindModelAttr(app) {
-    if (this.config.mname) {
-      if (app.service[this.config.mname] === undefined) app.service[this.config.mname] = {};
-      app.service.__model__ = app.service[this.config.mname];
-    }
-  }
-
-  /**
-   * 加载数据库操作接口，一个表要对应一个js文件，
-   */
-  loadModel(app) {
-    if (this.config.mname && app.service[this.config.mname] === undefined) {
-      app.service[this.config.mname] = {};
-    }
-
-    this.bindModelAttr(app);
-
-    try {
-
-      let mlist = getModelFiles(this.config.modelPath);
-
-      mlist.forEach( m => {
-        this.requireModel(app, m);
-      });
-
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  getModelInstance(mfile, db) {
-    let m = require(mfile);
-    
-    // Arrow Function has no prototype
-    if (typeof m !== 'function' || m.prototype === undefined) {
-      if (m.init && typeof m.init === 'function') {
-        m.init(db);
-      }
-
-      return m;
-    }
-
-    return db ? new m(db) : new m();
-  }
-
-  requireModel(app, mfile) {
-    try {
-      let mobj = this.getModelInstance(this.config.modelPath + '/' + mfile, this.mdb);
-
-      let mname = mfile.substring(0, mfile.length-3);
-
-      mname = `${this.config.modelNamePre}${mname}`;
-
-      if (!this.config.mname) {
-        if (app.service[mname] !== undefined) {
-          outWarning(`model 冲突 ---- ${mfile}{${mname}} 已经设置。`);
-          return false;
-        }
-        app.service[mname] = mobj;
-      } else {
-        if (app.service[this.config.mname][mname] !== undefined) {
-          outWarning(`model 冲突 ---- ${mfile}{${mname}} 已经设置。`);
-          return false;
-        }
-        app.service[this.config.mname][mname] = mobj;
-      }
-    } catch (err) {
-      console.error(err.message, ' -- ', mfile);
-      return false;
-    }
-
-    return true;
+    if (mobj) app.use(mobj, opts);
   }
 
   stripExtName(filename) {
@@ -911,10 +597,6 @@ class TopbitLoader {
 
   /**
    * 读取控制器目录中的文件
-   * @param {string} cdir 
-   * @param {object} cfiles 
-   * @param {number} deep 
-   * @param {string} dirgroup 
    */
   readControllers(cdir, cfiles, deep = 0, dirgroup = '') {
     let files = fs.readdirSync(cdir, {withFileTypes:true});
@@ -924,16 +606,10 @@ class TopbitLoader {
 
       if (files[i].isDirectory() && deep < 1) {
 
-        if (files[i].name[0] == '!') {
-          continue;
-        }
+        if (files[i].name[0] == '!') continue;
 
-        //检测是否启用了分组控制
-        //这时候，只有在subgroup之内的才会去加载
         if (this.config.subgroup instanceof Array) {
-            if (this.config.subgroup.indexOf(files[i].name) < 0) {
-              continue;
-            }
+            if (this.config.subgroup.indexOf(files[i].name) < 0) continue;
         }
 
         if (this.routepreg.test(files[i].name) === false) {
@@ -947,17 +623,9 @@ class TopbitLoader {
         );
 
       } else if (files[i].isFile()) {
-        if (files[i].name[0] === '!') {
-          continue;
-        }
-
-        if (files[i].name.length < 4) {
-          continue;
-        }
-
-        if (files[i].name.substring(files[i].name.length-3) !== '.js') {
-          continue;
-        }
+        if (files[i].name[0] === '!') continue;
+        if (files[i].name.length < 4) continue;
+        if (files[i].name.substring(files[i].name.length-3) !== '.js') continue;
 
         if (this.config.subgroup instanceof Array && deep < 1) {
           if (this.config.subgroup.indexOf('') < 0 && this.config.subgroup.indexOf('/') < 0) {
@@ -966,7 +634,6 @@ class TopbitLoader {
         }
 
         if (files[i].name == '__mid.js') {
-          //顶层并且忽略全局中间件选项为false则加载全局中间件。
           if (deep == 0) {
             this.globalMidTable = require(cdir+'/'+files[i].name);
           } else {
@@ -991,7 +658,6 @@ class TopbitLoader {
         };
       }
     }
-    
   }
 
 }
