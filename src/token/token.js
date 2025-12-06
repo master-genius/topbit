@@ -328,14 +328,14 @@ class TopbitToken {
     return opts
   }
 
-  makeAccessToken(info, id=null, key=null) {
+  makeToken(info, id=null, key=null) {
     let riv = randstring(this.ivLength)
     let tid = id || this.randId()
     let token = this.makeikv(info, {id: tid, iv: riv, key: key||this.key})
     return `${riv}.${token}`
   }
 
-  verifyAccessToken(edata) {
+  verifyToken(edata) {
     let tarr = edata.split('.')
 
     if (tarr.length != 2 || !tarr[0] || !tarr[1]) {
@@ -420,7 +420,7 @@ class TopbitToken {
         return c.status(self.failedCode).to('!token')
       }
 
-      let uinfo = self.verifyAccessToken(token)
+      let uinfo = self.verifyToken(token)
 
       if (!uinfo.ok) {
         return c.status(self.failedCode).to(uinfo.errcode)
