@@ -155,7 +155,7 @@ class Session {
 
       }
 
-      await next()
+      await next(c)
 
       if (c._sessionState) {
         let tmpText = JSON.stringify(c._session)

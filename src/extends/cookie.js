@@ -6,9 +6,8 @@ class Cookie {
   }
 
   mid() {
-
     return async (rr, next) => {
-      rr.cookie = {}
+      rr.box.cookie = {}
 
       if (rr.headers['cookie']) {
         let cookies = rr.headers['cookie'].split(';').filter(c => c.length > 0)
@@ -25,16 +24,16 @@ class Cookie {
           }
 
           if (tmpList.length < 2) {
-            rr.cookie[name] = ''
+            rr.box.cookie[name] = ''
           } else {
-            rr.cookie[name] = tmpList[1]
+            rr.box.cookie[name] = tmpList[1]
           }
         }
       }
 
       await next(rr)
       
-      rr.cookie = null
+      rr.box.cookie = null
     }
 
   }

@@ -197,7 +197,7 @@ class Bodyparser {
     if (cdpobj.filename !== undefined) {
         let file_post = {
           filename: cdpobj.filename,
-          'content-type': headers['content-type'] || 'application/octet-stream',
+          type: headers['content-type'] || 'application/octet-stream',
           start:  data_start,
           end:    end_ind,
           length: data_length,
@@ -210,8 +210,6 @@ class Bodyparser {
           file_post.filename = file_post.filename.substring(slash_index+1);
         }
 
-        //content-type
-        file_post.type = file_post['content-type'];
         let upload_name = cdpobj.name || 'file';
 
         if (ctx.files[upload_name] === undefined) {

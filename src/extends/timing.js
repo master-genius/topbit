@@ -20,7 +20,7 @@ class Timing {
       PATCH : new Map()
     }
 
-    this.maxLimit = 100
+    this.maxLimit = 1000
 
     this.test = false
 
@@ -51,7 +51,7 @@ class Timing {
 
       let start_time = Date.now()
 
-      await next()
+      await next(c)
 
       let end_time = Date.now()
 

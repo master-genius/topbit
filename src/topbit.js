@@ -387,6 +387,9 @@ class Topbit {
         case 'fastParseQuery':
         case 'allowHTTP1':
           this.config[k] = !!options[k]; break;
+
+        case 'log':
+          this.config.globalLog = !!options[k]; break;
   
         case 'notFound':
         case 'badRequest':
@@ -878,7 +881,7 @@ class Topbit {
     //如果没有添加路由则添加默认路由
     if (this.router.count === 0) {
       this.router.get('/*', async c => {
-        c.setHeader('content-type', 'text/html; charset=utf-8').send(_topbit_home_page)
+        c.setHeader('content-type', 'text/html; charset=utf-8').to(_topbit_home_page)
       })
     }
   

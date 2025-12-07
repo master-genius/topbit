@@ -109,11 +109,11 @@ class ToFile {
     let self = this
     return async (c, next) => {
       if (!c.isUpload) {
-        return await next()
+        return await next(c)
       }
 
       c.getFile = getFile
-      await next()
+      await next(c)
     }
 
   }
