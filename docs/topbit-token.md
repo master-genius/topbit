@@ -36,8 +36,8 @@ TopbitToken 是专为 Topbit 框架打造的零依赖、极简、高安全的加
 ### 三、快速上手（30 秒搞定登录认证）
 
 ```js
-// middleware/@token.js
-const TopbitToken = require('topbit-token')
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
 
 const token = new TopbitToken({
   key       : 'your-32-byte-secret-key-here!!',   // 必须 32 字节（AES-256）
@@ -89,6 +89,9 @@ token.mid() 会自动把验证后的用户信息挂到 c.user
 ### 五、高级功能：多密钥 + 即时失效（防泄漏神器）
 
 ```js
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
+
 const token = new TopbitToken({
   key: 'master-key-2025-01-01',
   expires: 3600 * 24 * 30
@@ -113,6 +116,9 @@ token.tokenIds = []
 ### 六、自动刷新 Token 机制
 
 ```js
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
+
 const token = new TopbitToken({
   expires: 3600 * 24,   // 24小时有效
   refresh: true         // 开启自动刷新
@@ -128,8 +134,8 @@ const token = new TopbitToken({
 ### 七、最佳实践（生产级推荐配置）
 
 ```js
-// middleware/@auth.js
-const TopbitToken = require('topbit-token')
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
 
 const token = new TopbitToken({
   algorithm : 'aes-256-gcm',

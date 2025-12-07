@@ -35,8 +35,8 @@ Built entirely on Node.js native `crypto`, supports:
 ### 3. 30-Second Quick Start
 
 ```js
-// middleware/@token.js
-const TopbitToken = require('topbit-token')
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
 
 const token = new TopbitToken({
   key     : 'your-very-strong-32-byte-secret!!',
@@ -79,6 +79,9 @@ async post(c) {
 ### 5. Advanced: Multi-Key + Instant Revocation
 
 ```js
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
+
 const token = new TopbitToken({ key: 'current-master-key' })
 
 // Add multiple key versions
@@ -112,8 +115,8 @@ Frontend just replaces the old one → seamless “never expire” experience.
 ### 7. Production Recommended Setup
 
 ```js
-// middleware/@auth.js
-const TopbitToken = require('topbit-token')
+const Topbit = require('topbit')
+const TopbitToken = Topbit.Token
 
 const token = new TopbitToken({
   algorithm : 'aes-256-gcm',
