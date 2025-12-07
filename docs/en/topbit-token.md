@@ -1,4 +1,6 @@
-# TopbitToken – Ultra-Fast & Secure Token System for Topbit
+# 🔐 TopbitToken
+
+**Ultra-Fast & Secure Token System for Topbit🪙**
 
 
 ### 1. What is TopbitToken?

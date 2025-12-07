@@ -23,7 +23,7 @@ Topbit is a server-side Web framework based on Node.js. It has no third-party de
 *   **Auto-Scaling:** Optional automatic load mode: creates new child processes to handle requests based on load and restores the initial state when idle.
 *   **Security:** Default settings related to network security to avoid DDoS attacks and other network security issues at the software service level.
 
-## Installation
+## 📦Installation
 
 ```javascript
 npm i topbit
@@ -418,7 +418,7 @@ Specifying multiple middlewares in this way can be somewhat complex; you can use
 
 const Topbit = require('topbit')
 // Import ToFile extension
-const {ToFile} = require('topbit-toolkit')
+const {ToFile} = Topbit.extensions
 
 const app = new Topbit({
   debug: true
@@ -485,7 +485,7 @@ It supports adding via return values, so passing a callback function is not mand
 
 const Topbit = require('topbit')
 // Import ToFile extension
-const {ToFile} = require('topbit-toolkit')
+const {ToFile} = Topbit.extensions
 
 const app = new Topbit({
   debug: true
@@ -552,10 +552,6 @@ app.post('/upload', async c => {
   
   let f = c.getFile('image')
 
-  // Helper functions: makeName generates a name based on timestamp by default,
-  // extName parses the file extension.
-  // let fname = `${c.ext.makeName()}${c.ext.extName(f.filename)}`
-
   // Generate a unique filename based on original extension + timestamp + random number.
   let fname = c.ext.makeName(f.filename)
 
@@ -582,8 +578,6 @@ This structure is designed based on the data construction of HTTP protocol file 
 {
   image : [
     {
-      'content-type': CONTENT_TYPE,
-      // Available since 23.2.6, alias for content-type for easier access
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
       start : START,
@@ -597,8 +591,6 @@ This structure is designed based on the data construction of HTTP protocol file 
 
   video : [
     {
-      'content-type': CONTENT_TYPE,
-      // Available since 23.2.6, alias for content-type
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
       start : START,
@@ -728,7 +720,7 @@ app.use(setbodysize, {pre: true});
 
 ```
 
-Using `pre` allows for more complex processing, including intercepting and not executing the next layer. For example, the `proxy` module in the `topbit-toolkit` extension uses this feature to implement a high-performance proxy service directly as a framework middleware. Its main operation is to set the request's `data` event to receive data at this layer, handle other logic, and return directly.
+Using `pre` allows for more complex processing, including intercepting and not executing the next layer. For example, the `proxy` extension uses this feature to implement a high-performance proxy service directly as a framework middleware. Its main operation is to set the request's `data` event to receive data at this layer, handle other logic, and return directly.
 
 **Dynamically limiting request body size based on different request types**
 
@@ -1059,7 +1051,9 @@ To add extension support to the request context object, use `app.httpServ.contex
 
 ```javascript
 'use strict'
+
 const Topbit = require('topbit')
+
 const app = new Topbit({
     debug: true
 })
@@ -1186,7 +1180,7 @@ const app = new Topbit({
 if (cluster.isMaster) {
   app.setMsgEvent('test-msg', (worker, msg, handle) => {
     // Child process receives message via message event
-    worker.to({
+    worker.send({
       id : worker.id,
       data : 'ok'
     })
@@ -1200,7 +1194,7 @@ if (cluster.isMaster) {
   })
 
   setIneterval(() => {
-    process.to({
+    process.send({
       type : 'test-msg',
       pid : process.pid,
       time : (new Date()).toLocaleString()
@@ -1213,7 +1207,7 @@ if (cluster.isMaster) {
 
 Sending messages from worker processes is complex. Since version 22.4.0, a `send` method is provided for quick message sending. It only sends to master from a worker process, so no extra worker check is needed.
 
-## app.to and app.workerMsg
+## app.send and app.workerMsg
 
 Let's rewrite the worker message sending part of the code above:
 
@@ -1229,7 +1223,7 @@ const app = new Topbit({
 // Master process registers message event type. Worker process ignores this.
 app.setMsgEvent('test-msg', (worker, msg, handle) => {
   // Child process receives message via message event
-  worker.to({
+  worker.send({
     id : worker.id,
     data : 'ok'
   })
@@ -1246,7 +1240,7 @@ cluster.isWorker
     &&
 setInterval(() => {
   // Only worker executes.
-  app.to('test-msg', {
+  app.send('test-msg', {
     pid: process.pid,
     time: (new Date).toLocaleString()
   })
@@ -1287,7 +1281,7 @@ When load is high, child processes are created. After a period of idleness, proc
 
 ----
 
-## Strong Mode
+## 🛡️Strong Mode
 
 Enable strong mode via the `strong` option. This monitors `uncaughtException` and `unhandledRejection` events to ensure stable operation. Simplest usage: set `strong` to `true`.
 
@@ -1343,11 +1337,11 @@ const app = new Topbit({
       ]
 
     }
-});
+})
 
 ```
 
-## Simultaneous HTTP and HTTPS?
+## 🔔Simultaneous HTTP and HTTPS?
 
 Note the question mark. You shouldn't do this in production. If HTTPS is enabled, HTTP isn't needed, and some frontend features won't work without HTTPS.
 
@@ -1476,6 +1470,869 @@ app.daemon(8008, 2);
 
 ```
 
-**Note: Requires `loadMonitor` option (enabled by default unless set to false).**
+**Note: Requires `loadMonitor` option (enabled by default).**
 
-Service initialization automatically sets configuration based on available system memory. Unless necessary, stick to default configurations.
+Here is the English translation of the document:
+
+---
+
+# 🧩 Middleware Extensions and Other Extensions 📜
+
+---
+
+As a Web framework, providing only basic functionality is not enough. Many basic functions are used across all Web services, which inevitably leads to the creation of universal extension modules.
+
+In Topbit's global middleware design mechanism, most web service-related extensions can be completed by developing a middleware extension. You can refer to the `Middleware` section; this plugin mechanism is extremely flexible.
+
+**Topbit provides several universal middleware extensions that developers can use as needed.**
+
+**It also provides other extension modules: Route Loader, Token Session Verification, Command Argument Parsing, Automatic Error Log Processing, and ZIP compression/decompression.**
+
+## Importing Middleware Extensions
+
+All middleware extensions are located under `Topbit.extensions`. Example:
+
+```javascript
+'use strict'
+
+process.chdir(__dirname)
+
+const Topbit = require('Topbit')
+
+// Import extensions via destructuring assignment
+const {Cors, ToFile} = Topbit.extensions
+
+const app = new Topbit({
+  debug: true,
+  // Enable logging, alias for globalLog
+  log: true
+})
+
+// CORS extension runs before body parsing
+// Middleware added via 'use' runs after body data parsing
+app.pre(new Cors())
+  .use(new ToFile, {method: ['PUT', 'POST']})
+
+app.post('/file', async ctx => {
+  let f = ctx.getFile('file')
+  if (!f) return ctx.status(400).to('file not found')
+
+  ctx.to(
+    await f.toFile('./uploads')
+  )
+})
+
+app.run(1235)
+```
+
+## ☲ Middleware Extensions
+
+| Middleware | Description |
+| :--- | :--- |
+| **Cors** | Middleware to support Cross-Origin Resource Sharing (CORS). |
+| **Resource** | Static resource processing; a powerful service for serving static files. |
+| **ToFile** | Equips uploaded file objects with a `toFile` method. |
+| **SSE** | SSE (Server-Sent Events) protocol middleware for HTTP-based data streaming. |
+| **Proxy** | Reverse proxy for the HTTP/1.1 protocol, supporting load balancing and alive checks. |
+| **Http2Proxy** | Reverse proxy for the HTTP/2 protocol, supporting load balancing and alive checks. |
+| **SNI** | Support for multi-domain HTTPS (Server Name Indication). |
+| **ParamCheck** | Request parameter validation, supporting checks for `param`, `query`, and `body`. |
+| **JWT** | Token verification using the JWT protocol. (Note: `Topbit.Token` is recommended instead as it is much stronger than JWT). |
+| **Cookie** | Parses cookies from the frontend request headers. |
+| **Session** | Session management using a local file mechanism. |
+
+---
+
+The following documentation is reorganized based on the original `titbit-toolkit` documentation you provided, adapted for the new list order.
+
+**Note**:
+*   The documentation has been adjusted for the **Topbit** framework context (no longer emphasizing standalone installation of extensions).
+*   Components not included in the list above have been removed.
+
+---
+
+### 1. Cors (Cross-Origin Support)
+
+Middleware that supports cross-origin requests. It supports cross-origin communication via the `origin` header as well as resource inclusion via `referer`, allowing for flexible selection and configuration.
+
+**Basic Usage:**
+
+```javascript
+const Topbit = require('topbit')
+const {Cors} = Topbit.extensions
+
+let cr = new Cors({
+    // Defaults to *, meaning cross-origin is enabled for all.
+    // If you want to specify supported domains, pass an array.
+    // Note: This specifies the domain of the application page accessing the API.
+    allow : [
+        'https://a.com',
+        'https://www.a.com',
+    ],
+
+    // Defaults to content-type only
+    allowHeaders : 'authorization,content-type',
+
+    // Caches OPTIONS requests for 60 seconds; the browser will read from cache during this period.
+    optionsCache: 60,
+
+    // Defaults to '*', sets allowed request methods.
+    // requestHeaders : '*'
+
+    // Defaults to '', indicating which headers can be exposed to the requester. Multiple headers are separated by commas.
+    // exposeHeaders: 'x-test-key,x-type'
+})
+
+app.pre(cr)
+
+// Supports OPTIONS requests. Browsers send an OPTIONS preflight request before processing POST/PUT/DELETE.
+// You must handle OPTIONS requests to fully support CORS.
+app.options('/*', async c => {})
+```
+
+**Advanced Configuration (Referer Check & Grouping):**
+
+```javascript
+let cr = new cors({
+  // Do not allow empty referer
+  allowEmptyReferer: false,
+
+  // Route groups that allow empty referer.
+  // Group names are custom; refer to the framework's route grouping feature.
+  // This is mainly used when API development also needs to serve pages.
+  emptyRefererGroup: [
+    '@webapp', '@pages'
+  ],
+
+  allow: [
+     // Default string format allows both origin cross-domain and referer external linking
+    'https://w.a.com',
+    'https://w.x.cn',
+
+    {url: 'https://servicewechat.com/wx234hiohr23', referer: true},
+    // Not applied to referer check; if a request submits referer as self-define, it will not pass
+    {url: 'self-define', referer: false}
+  ],
+})
+```
+
+---
+
+### 2. Resource (Static Resource Processing)
+
+Static resource processing service, mainly used for hosting JS, CSS, images, audio, and other static files. Supports cache control, route prefix correction, and more.
+
+**Basic Usage:**
+
+```javascript
+const Topbit = require('topbit')
+const {Resource} = Topbit.extensions
+
+let st = new Resource({
+    // Set the directory where static resources are located
+    staticPath: './public'
+})
+
+// Execute middleware only for the 'static' group.
+app.use(st, {group: 'static'})
+
+// Add static resource route. Assuming 'css/a.css' exists in the 'public' directory.
+// Access via /static/css/a.css
+app.get('/static/*', async c => {
+    // Request is in group 'static'
+}, '@static')
+```
+
+**Quick Example & Configuration Details:**
+
+```javascript
+let st = new Resource({
+    // Set the directory where static resources are located
+    staticPath: './public',
+
+    // Route path: Frontend must start with /static/, mapping to files in ./public
+    routePath : '/static/*',
+
+    // Specify route group
+    routeGroup: '_static',
+
+    // Whether to support decoding of Chinese paths (default false)
+    decodePath: true,
+
+    // Prefix path correction. If set to xyz, it automatically corrects to /xyz.
+    // prepath : '',
+
+    // Maximum file size to cache (in bytes); files larger than this will not be cached.
+    maxFileSize: 12_000_000,
+
+    // Set the value of the cache-control header, defaults to null
+    cacheControl: 'max-age=3600',
+    
+    // Maximum total cache size (default 120MB)
+    maxCacheSize: 120_000_000,
+
+    // Failure limit and cache release probability
+    failedLimit: 50,
+    prob: 6
+})
+
+st.init(app)
+
+// Automatically added to the _static group.
+// Example: If favicon.ico is in the public directory, it can be accessed via this request.
+app.get('/favicon.ico', async c => {}, {group: '_static'})
+```
+
+**Interface Description:**
+*   `addType(obj)`: Add mapping from extension to content-type.
+*   `clearCache()`: Clear the cache.
+
+---
+
+### 3. ToFile (File Upload Objectification)
+
+Equips uploaded file objects with a `toFile` method, facilitating file saving in an object-oriented style.
+
+```javascript
+const Topbit = require('topbit')
+const {ToFile} = Topbit.extensions
+
+app.use( new ToFile() )
+
+app.post('/upload', async c => {
+    // Get the uploaded file object
+    let f = c.getFile('image')
+
+    if (!f) {
+        return c.status(400).oo('image file not found')
+    }
+
+    // Move the file to the 'images' directory (ensure the directory exists).
+    // The second parameter is optional to specify a filename; defaults to a unique name based on timestamp and random number.
+    let fname = await f.toFile('./images')
+
+    // Return filename
+    c.ok(fname)
+})
+
+app.run(1234)
+```
+
+---
+
+### 4. SSE (Server-Side Messaging)
+
+Server-Sent Events (SSE) middleware based on the HTTP protocol, used for the server to proactively push data streams to the client.
+
+**Basic Usage:**
+
+```javascript
+const Topbit = require('topbit')
+const {SSE} = Topbit.extensions
+
+let s = new SSE({
+  // Timeout 20 seconds; connection closes automatically after this time
+  timeout: 20000,
+
+  // Reconnection time; default is 0 meaning do not reconnect
+  retry: 5000,
+
+  // Timer interval; execute the handler function every 2 seconds
+  timeSlice: 2000
+})
+
+// Set handler function, ctx is the request context
+s.handle = (ctx) => {
+    // Send a single message
+    ctx.sendmsg({event: 'eat', data: 'Rice'})
+    
+    if (Date.now() % 5 === 0) {
+        // Send multiple messages. Strings or numbers are automatically converted to message format.
+        // Default event is 'message'.
+        ctx.sendmsg([
+            {event: 'clock', data: Date.now()},
+            'May we all be blessed with longevity.',
+            Math.random()
+        ])
+    }
+}
+
+// Enable middleware only for route group 'sse'
+app.use( s, {group: 'sse'} )
+
+app.get('/sse', async ctx => {}, {group: 'sse'})
+
+app.run(1234)
+```
+
+**Generator Mode:**
+Suitable for scenarios requiring dynamic interval adjustment or precise control.
+
+```javascript
+let s = new SSE({
+  timeout: 20000,
+  retry: 5000,
+  timeSlice: 10,
+  mode: 'yield' // Enable generator mode
+})
+
+s.handle = (ctx) => {
+    ctx.sendmsg({event: 'eat', data: 'Rice'})
+    // Use await ctx.sse.moment(ms) for delay
+    await ctx.sse.moment(100)
+}
+```
+
+---
+
+### 5. Proxy (HTTP/1.1 Reverse Proxy)
+
+Reverse proxy for HTTP/1.1 protocol, supporting load balancing and Alive Check.
+
+**Basic Proxy Configuration:**
+
+```javascript
+const Topbit = require('topbit')
+const {Proxy} = Topbit.extensions
+
+let hostcfg = {
+    // Simple mapping: default path is /
+    'a.com' : 'http://localhost:8001',
+
+    // Specific path mapping
+    'b.com' : {
+        path : '/xyz',
+        url : 'http://localhost:8002'
+    },
+
+    // Complex config and rewrite
+    'c.com' : [
+        {
+            path : '/',
+            url : 'http://localhost:8004',
+            rewrite: (ctx, path) => {
+              // Custom route rewrite rules
+              if (path.indexOf('/xyz') === 0) {
+                return path.replace('/xyz', '/w')
+              }
+            }
+        }
+    ]
+};
+
+const pxy = new Proxy({
+    timeout: 10000,
+    config: hostcfg
+})
+
+pxy.init(app)
+
+app.run(1234)
+```
+
+**Load Balancing Configuration:**
+Implemented via configuration arrays, supporting `weight` and alive checks.
+
+```javascript
+let load_balance_cfg = {
+    'a.com' : [
+        {
+            path : '/',
+            url : 'http://localhost:1234',
+            // Check service liveness every 3 seconds
+            aliveCheckInterval : 3,
+            aliveCheckPath : '/alive-check',
+            // Weight: larger numbers mean higher weight
+            weight: 3
+        },
+        {
+            path : '/',
+            url : 'http://localhost:1235',
+            aliveCheckInterval : 3,
+            aliveCheckPath : '/ok',
+            weight: 2
+        }
+    ]
+}
+
+const pxy = new Proxy({
+    timeout: 10000,
+    starPath : true, // If enabled, forwards the string after the proxy path as the path
+    config: load_balance_cfg
+})
+
+pxy.init(app)
+```
+
+---
+
+### 6. Http2Proxy (HTTP/2 Reverse Proxy)
+
+Reverse proxy for HTTP/2 protocol. Parameters are basically the same as `Proxy`, using HTTP/2 connection mechanisms for keep-alive.
+
+```javascript
+const Topbit = require('topbit')
+const {Http2Proxy} = Topbit.extensions
+
+let hxy = new Http2Proxy({
+  config: {
+    'a.com' : [
+      {
+        url: 'http://localhost:3001',
+        weight: 10,
+        path : '/',
+        reconnDelay: 200, // Reconnection delay
+        max: 2,
+        headers: {
+          'x-test-key': `${Date.now()}`
+        },
+        connectTimeout: 2000
+      },
+      {
+        url: 'http://localhost:3002',
+        weight: 4,
+        path : '/'
+      }
+    ]
+  },
+  debug: true
+})
+
+hxy.init(app)
+
+app.run(1234)
+```
+
+---
+
+### 7. SNI (HTTPS Multi-Domain Support)
+
+**Description**: Middleware to support multiple HTTPS domain certificates on the same IP address and port. It uses the TLS protocol's Server Name Indication feature to dynamically load the corresponding SSL certificate based on the domain requested by the client.
+
+**Note**: Certificates are read synchronously during initialization; please ensure paths are correct. If a certificate for a domain fails to read, an error will be output to the console, but it will not block the loading of other domains.
+
+**Usage:**
+
+```javascript
+const Topbit = require('topbit')
+const {SNI} = Topbit.extensions
+
+const app = new Topbit({
+    // Enable HTTPS; it's recommended to configure a default key and cert as fallback
+    https: true,
+    key: './ssl/default.key',
+    cert: './ssl/default.cert',
+    debug: true
+})
+
+// Configure multi-domain certificates
+// Key is the domain, Value is an object containing paths to key and cert
+let certs = {
+    'a.com': {
+        key: './ssl/a.com.key',
+        cert: './ssl/a.com.cert'
+    },
+    'www.b.org': {
+        key: '/etc/nginx/ssl/b.org.key',
+        cert: '/etc/nginx/ssl/b.org.crt'
+    }
+}
+
+// Instantiate and initialize
+let sni = new SNI(certs)
+
+// The init method injects SNICallback into app.config.server
+sni.init(app)
+
+app.run(443)
+```
+
+**Parameters**:
+*   The constructor accepts an object where keys are **domains** and values are configuration objects.
+*   The configuration object must contain:
+    *   `key`: Path to the private key file.
+    *   `cert`: Path to the certificate file.
+
+---
+
+### 8. ParamCheck (Request Parameter Validation)
+
+Supports declarative checks for `param` (route parameters), `query` (query strings), and `body` (request body).
+
+**Query and Param Check:**
+
+```javascript
+const Topbit = require('topbit')
+const {ParamCheck} = Topbit.extensions
+
+// Query parameter check
+let pck = new ParamCheck({
+  key: 'query',
+  data : {
+    // Strictly restrict value
+    say: 'hello',
+    // Type conversion and range restriction
+    offset: {
+      default: 0,
+      to: 'int',
+      min: 0,
+      max: 100
+    }
+  }
+})
+
+// Param parameter check and custom callback
+let paramck = new ParamCheck({
+  key: 'param',
+  deny: ['x-key'], // Fields forbidden to submit
+  deleteDeny: true,
+  data : {
+    errorMessage: 'Parameter Error', // Custom error message
+    mobile: {
+      callback: (obj, k, method) => {
+        let preg = /^(12|13|15|16|17|18|19)[0-9]{9}$/
+        return preg.test(obj[k])
+      }
+    }
+  }
+})
+
+app.use(pck, {method: 'GET'})
+   .use(paramck, {method: 'GET'})
+```
+
+**Body Check:**
+
+```javascript
+let pmbody = new ParamCheck({
+  key: 'body',
+  data: {
+    username: { must: true },
+    passwd: { must: true }
+  }
+})
+
+app.use(pmbody, {method: ['POST', 'PUT'], name: 'login'})
+```
+
+---
+
+### 9. JWT (Token Verification)
+
+JWT protocol Token verification and issuance. It is recommended to use `Topbit.Token` instead.
+
+```javascript
+const Topbit = require('topbit')
+const {JWT} = Topbit.extensions
+
+let j = new JWT({
+  timeout: 7200000, // Timeout duration
+})
+j.alg = 'hs512' // Set algorithm
+
+// Issue Token
+let token = j.make({
+  id: '123we',
+  username: 'long'
+})
+
+// Verify Token
+// Returns object: { ok: true, data: {...} } or { ok: false, errcode: '...' }
+let r = j.verify(token)
+
+// Use as middleware
+// On successful verification, data is mounted to ctx.box.user
+app.pre(j.mid()) 
+```
+
+---
+
+### 10. Cookie (Cookie Parsing)
+
+Parses Cookies from the frontend request headers and adds a `cookie` property to the request context.
+
+```javascript
+const Topbit = require('topbit')
+const {Cookie} = Topbit.extensions
+
+app.use( new Cookie() )
+
+app.get('/', async ctx => {
+  // Get parsed cookie object
+  console.log(ctx.cookie)
+})
+
+app.run(1234)
+```
+
+---
+
+### 11. Session (Session Management)
+
+Session management based on local file mechanisms, dependent on the Cookie component.
+**Note**: This extension is mainly for testing and teaching; for production environments, it is recommended to use Redis or other database storage solutions.
+
+```javascript
+const Topbit = require('topbit')
+const {Cookie,Session} = Topbit.extensions
+
+let sess = new Session()
+sess.init(app) // Initialize: Adds ctx prototype methods
+
+// Must enable Cookie first, then Session
+app.use( new Cookie() ).use( sess )
+
+app.get('/:key/:data', async ctx => {
+  // Set Session
+  ctx.setSession(ctx.param.key, ctx.param.data)
+  
+  // Get Session (key defaults to null to get all)
+  let data = ctx.getSession()
+  
+  ctx.ok(data)
+})
+
+app.run(1234)
+
+// Other methods:
+// ctx.delSession(key) - Delete specific Session
+// ctx.clearSession()  - Clear all Sessions
+```
+
+---
+
+## ⌨️ Command Argument Parsing
+
+**Used for quickly parsing `process.argv`.**
+
+### Usage Example
+
+```javascript
+'use strict'
+
+const Topbit = require('Topbit')
+const parseArgv = Topbit.npargv
+
+let ret = parseArgv({
+  '--port=' : {
+    name: 'port',
+    // Alias
+    alias: '-p',
+    type: 'int',
+    min: 2000,
+    max: 2100
+  },
+
+  '--host=' : {
+    name: 'host',
+    match: /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/i
+  },
+
+  '-w' : {
+    name: 'worker',
+    type: 'int',
+    min: 1,
+    max: 4,
+    // If a default value is set, it will automatically use the default value instead of returning an error when the argument is invalid.
+    default: 2
+  },
+
+  '--https': {
+    name: 'https'
+  },
+
+  '--http2': {
+    name: 'http2'
+  },
+
+  '--test': {
+    name: 'test'
+  },
+
+  '--id' : {
+    name : 'id',
+    callback: (str) => {
+      return str.split(',').filter(p => p.length > 0)
+    }
+  },
+
+  // Automatically converts to {type: 'bool', name: 'limit'}
+  '--limit' : 'limit',
+
+  // Automatically converts to {type: 'bool', name: '-x'}
+  '-x' : false
+
+})
+
+console.log(ret)
+```
+
+Run with command arguments:
+
+```shell
+$ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,5 --local a b c
+```
+
+Output result:
+
+```javascript
+{
+  ok: true,
+  errmsg: '',
+  args: {
+    worker: 2,
+    https: true,
+    http2: true,
+    test: true,
+    limit: false,
+    host: '1.2.3.4',
+    port: 2010,
+    id: [ '1', '2', '3', '4', '5' ],
+    '--local': true,
+    '-x': false
+  },
+  // Items that are not arguments and do not start with - are placed in 'list' for easy access.
+  // If positional reference arguments exist, they are parsed first, so 'x' is not in the list here (assuming it was consumed).
+  list: ['a', 'b', 'c']
+}
+```
+
+In the parsed result, if `ok` is false, `errmsg` will provide the error message. If there are no errors, `args` is the parsed argument object.
+
+During parsing, if an argument is not in the passed object description, it will still appear in `args`, with the key being the argument name (see `--local` in the example).
+
+If the description info for an argument is not an object, it converts to boolean type, using the argument name as `name`. See the `-x` parameter.
+
+**If no `type` is specified to limit the scope, the `type` is automatically set based on the description. This may lead to incorrect judgments, so specify `type` whenever possible.**
+
+**Type inference rules:**
+
+- If the argument contains `=`, e.g., `--port=`, the type is `string`.
+- Otherwise, if the description object has `match` or `callback`, it is `string` type.
+- Otherwise, if the description object contains `min` or `max`, it is `int` type.
+- Otherwise, if the description object has `default`, and `default` is a number or string, the type matches the `default` type.
+- Otherwise, the type is `bool`.
+
+**Supported types:**
+
+- `int` or `number`: Integer type.
+- `float`: Floating-point type.
+- `string`: String type.
+- `bool` or `boolean`: Boolean type.
+
+### Argument Description Options
+
+| Option | Required | Description |
+| :--- | :--- | :--- |
+| type | No | Argument type. If not given, it is automatically set based on description info. |
+| name | No | Name of the parsed argument (key in the parsed object). If not given, uses the argument name. |
+| min | No | Restricts minimum value. |
+| max | No | Restricts maximum value. |
+| default | No | Default value. If set, invalid arguments will default to this value without returning an error. `default` is invalid for bool types (defaults to false). |
+| match | No | Regular expression. If given, regex matching is performed. |
+| callback | No | Function. If given, passes the argument value to the function. If the return value is not undefined, it is used as the final parsed value. |
+
+### autoDefault (Automatic Default Values)
+
+Sometimes the program requires parameters to be returned, using default values if invalid. This usually requires setting the `default` property for every option, or using `@autoDefault` to let `npargv` set defaults automatically.
+
+```javascript
+'use strict'
+
+const Topbit = require('Topbit')
+const parseArgv = Topbit.npargv
+
+let opts = {
+  // Enable automatic default setting.
+  '@autoDefault' : true,
+
+  // No default set; automatically sets default to the value of min.
+  '--port' : {
+    min: 1234,
+    max: 5678
+  },
+
+  // No default set, type is number, no min limit; automatically sets to 0.
+  '-x' : {
+    type : 'int'
+  }
+}
+
+let {args} = parseArgv(opts)
+```
+
+Rules for automatic defaults:
+
+- If `type` is `bool`, default is `false`.
+- If `type` is `string`, default is an empty string.
+- If `type` is `number`, `int`, or `float`, default is the value of `min`. If no `min`, default is `0`.
+
+### First Argument as Subcommand
+
+```javascript
+let argscfg = {
+    // Define supported subcommands
+    '@command' : [
+        'create', 'show', 'update', 'delete'
+    ],
+
+    // Default command when none is entered
+    '@defaultCommand': 'show'
+}
+```
+
+### Positional Reference Arguments
+
+Using `$` followed by a number as a key indicates a positional argument. These are parsed first.
+
+However, the positional index differs from internal indexing:
+
+- Index starts at 1.
+- Index refers to argument values, excluding the command name.
+- If `@command` is set, position 1 automatically starts after the command.
+
+Note: `@command` represents the first argument, used for script subcommand functionality.
+
+```javascript
+const Topbit = require('Topbit')
+const npargv = Topbit.npargv
+
+let {args} = npargv({
+    '@autoDefault': true,
+    '$1': {
+        type: 'string',
+    },
+    '$2': {
+        type: 'string',
+        callback: (v) => {
+            return ['i', 'o', 'v'].indexOf(v) >= 0 ? v : 'o'
+        }
+    }
+})
+```
+
+---
+
+## 🤖 Loader (Service Loader)
+
+TopbitLoader is the official "automatic loader" extension recommended by the Topbit framework, completely eliminating the tedious manual writing of `app.get()` and `app.use()`.
+
+It implements a true **MCM Pattern** (Middleware → Controller → Model), similar to MVC but lighter and more aligned with Topbit's extreme performance philosophy.
+
+[🌐 View Detailed Documentation ☛](./docs/en/topbit-loader.md)
+
+---
+
+## 🔐 Token (Session Verification) 🪙
+
+TopbitToken is a zero-dependency, minimalist, high-security encrypted user credential (Token) system built specifically for the Topbit framework.
+
+It is implemented entirely based on Node.js native `crypto`, supporting:
+
+- AES-256-GCM (Default, Recommended)
+- AES-192-GCM / AES-128-CBC / AES-256-CBC
+- SM4-CBC (National Standard)
+
+[🌐 View Detailed Documentation ☛](./docs/en/topbit-token.md)
+
+---

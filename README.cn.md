@@ -38,7 +38,7 @@ topbit是基于Node.js的运行于服务端的Web框架，它没有任何第三�
 * 默认设定和网络安全相关的配置，避免软件服务层面的DDOS攻击和其他网络安全问题。
 
 
-## 安装
+## 📦安装
 
 ```javascript
 npm i topbit
@@ -131,7 +131,7 @@ GET POST PUT PATCH DELETE OPTIONS  TRACE HEAD
 
 'use strict'
 
-const Topbit = require('topibit')
+const Topbit = require('topbit')
 
 const app = new Topbit({
   debug: true
@@ -176,7 +176,7 @@ app.run(8080)
 ``` JavaScript
 'use strict';
 
-const Topbit = require('topbit');
+const Topbit = require('topbit')
 
 let app = new Topbit({
     debug: true
@@ -443,7 +443,7 @@ app.run(1234)
 
 const Topbit = require('topbit')
 //导入ToFile扩展
-const {ToFile} = require('topbit-toolkit')
+const {ToFile} = Topbit.extensions
 
 const app = new Topbit({
   debug: true
@@ -509,7 +509,7 @@ app.run(1234)
 
 const Topbit = require('topbit')
 //导入ToFile扩展
-const {ToFile} = require('topbit-toolkit')
+const {ToFile} = Topbit.extensions
 
 const app = new Topbit({
   debug: true
@@ -575,9 +575,6 @@ app.post('/upload', async c => {
   
   let f = c.getFile('image')
 
-  //此函数是助手函数，makeName默认会按照时间戳生成名字，extName解析文件的扩展名。
-  //let fname = `${c.ext.makeName()}${c.ext.extName(f.filename)}`
-
   //根据原始文件名解析扩展名并生成时间戳加随机数的唯一文件名。
 
   let fname = c.ext.makeName(f.filename)
@@ -607,8 +604,6 @@ app.run(1234)
 {
   image : [
     {
-      'content-type': CONTENT_TYPE,
-      //23.2.6以上可用，是content-type的别名，方便程序访问
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
       start : START,
@@ -622,8 +617,6 @@ app.run(1234)
 
   video : [
     {
-      'content-type': CONTENT_TYPE,
-      //23.2.6以上可用，是content-type的别名，方便程序访问
       type: CONTENT_TYPE,
       filename: ORIGIN_FILENAME,
       start : START,
@@ -1056,18 +1049,18 @@ app.run(1234)
 
 'use strict';
 
-const Topbit = require('topbit');
+const Topbit = require('topbit')
 
 let app = new Topbit({
   debug: true
 });
 
 //有则会覆盖，没有则添加。
-app.addService('name', 'first');
+app.addService('name', 'first')
 app.addService('data', {
   id : 123,
   ip : '127.0.0.1'
-});
+})
 
 /*
 这可能看不出什么作用，毕竟在一个文件中，直接访问变量都可以，如果要做模块分离，就变得非常重要了。
@@ -1091,7 +1084,9 @@ app.run(1234)
 
 ```javascript
 'use strict'
+
 const Topbit = require('topbit')
+
 const app = new Topbit({
     debug: true
 })
@@ -1221,7 +1216,7 @@ const app = new Topbit({
 if (cluster.isMaster) {
   app.setMsgEvent('test-msg', (worker, msg, handle) => {
     //子进程中会通过message事件收到消息
-    worker.to({
+    worker.send({
       id : worker.id,
       data : 'ok'
     })
@@ -1235,7 +1230,7 @@ if (cluster.isMaster) {
   })
 
   setIneterval(() => {
-    process.to({
+    process.send({
       type : 'test-msg',
       pid : process.pid,
       time : (new Date()).toLocaleString()
@@ -1248,7 +1243,7 @@ if (cluster.isMaster) {
 
 比较麻烦的地方在于，worker进程发送消息比较复杂，在22.4.0版本开始，提供了一个send方法用于快速发送消息。只有在worker进程中才会发送给master进程，所以不必额外进行worker进程检测。
 
-## app.to 和 app.workerMsg
+## app.send 和 app.workerMsg
 
 现在让我们来改写上面代码的worker进程发送消息的部分：
 
@@ -1264,7 +1259,7 @@ const app = new Topbit({
 //master进程注册消息事件类型，worker进程不会执行。
 app.setMsgEvent('test-msg', (worker, msg, handle) => {
   //子进程中会通过message事件收到消息
-  worker.to({
+  worker.send({
     id : worker.id,
     data : 'ok'
   })
@@ -1281,7 +1276,7 @@ cluster.isWorker
     &&
 setInterval(() => {
   //只有worker会执行。
-  app.to('test-msg', {
+  app.send('test-msg', {
     pid: process.pid,
     time: (new Date).toLocaleString()
   })
@@ -1322,7 +1317,7 @@ app.daemon(1234, 2)
 
 ----
 
-## strong模式
+## 🛡️strong模式
 
 通过strong选项可以开启strong模式，此模式会监听uncaughtException和unhandledRejection事件，保证程序稳定运行。最简单的情况，你只需要给strong设置为true即可。
 
@@ -1382,7 +1377,7 @@ const app = new Topbit({
 
 ```
 
-## 同时运行http和https？
+## 🔔同时运行http和https？
 
 请注意这是打问号的，你最好不要在正式环境这样做，如果你已经开启了https，则不需要http，而且前端应用有些功能在不启用https是无法使用的。
 
@@ -1474,7 +1469,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 - 这一切你都可以通过配置选项或是中间件来进行扩展和重写，既有限制也有自由。
 
-- 它很快，并且我们一直在都在关注优化。如果你需要和其他对比测试，请都添加多个中间件，并且都添加上百个路由，然后测试对比。
+- 它很快，并且我们一直在都在关注优化。
 
 - 提供了一个sched函数用来快速设置cluster模式的调度方式，支持参数为'rr'或'none'，本质就是设置cluster.schedulingPolicy的值。
 
@@ -1482,12 +1477,12 @@ app.daemon(1234, '0.0.0.0', 3)
 框架在初始化会自动检测内存大小并设定相关上限，你可以在初始化后，通过更改secure中的属性来更改限制，这需要你使用daemon接口，也就是使用master管理子进程的模式。
 
 
-```
+```javascript
 'use strict'
 
-const Topbit = require('topbit');
+const Topbit = require('topbit')
 
-let app = new Topbit();
+let app = new Topbit()
 
 /*
  以下操作可以通过选项memFactor控制，请参考上文的配置选项部分。
@@ -1505,13 +1500,911 @@ app.secure.diemem = 900_000_000;
 app.secure.maxrss = 800_000_000;
 
 app.get('/', async c => {
-  c.to('ok');
+  c.to('ok')
 })
 
-app.daemon(8008, 2);
+app.daemon(8008, 2)
 
 ```
 
-**注意，这需要你开启loadMonitor选项，这是默认开启的，除非你设置为false**
+**注意，这需要你开启loadMonitor选项，这是默认开启的。**
 
-在服务始化时，会根据系统的可用内存来进行自动的设置，除非你必须要自己控制，否则最好是使用默认的配置。
+---
+
+# 🧩 中间件扩展和其他扩展 📜
+
+---
+
+作为Web框架，仅仅提供基础功能是不够的，很多基础功能在所有Web服务上都会用到，所以必然会出现通用的扩展模块。
+
+在Topbit全局中间件设计机制上，大部分和Web服务有关的扩展都可以通过开发一个中间件扩展完成，可以参考 `中间件` 部分，这种插件机制十分灵活。
+
+**Topbit提供了一些通用中间件扩展，开发者可以按需使用。**
+
+**也提供了一些其他扩展模块：路由加载器、Token会话验证、命令参数解析、错误日志自动化处理、zip压缩和解压。**
+
+## 导入中间件扩展
+
+所有中间件扩展都在Topbit.extensions下，示例：
+
+```javascript
+'use strict'
+
+process.chdir(__dirname)
+
+const Topbit = require('Topbit')
+
+//通过解构赋值导入扩展
+const {Cors, ToFile} = Topbit.extensions
+
+const app = new Topbit({
+  debug: true,
+  //开启日志，是globalLog的别名
+  log: true
+})
+
+// 跨域扩展在解析body之前运行
+// use添加的中间件解析body数据之后运行
+app.pre(new Cors())
+  .use(new ToFile, {method: ['PUT', 'POST']})
+
+app.post('/file', async ctx => {
+  let f = ctx.getFile('file')
+  if (!f) return ctx.status(400).to('file not found')
+
+  ctx.to(
+    await f.toFile('./uploads')
+  )
+})
+
+app.run(1235)
+```
+
+## ☲ 中间件扩展
+
+
+| 中间件      | 描述                                                                 |
+|----------------|----------------------------------------------------------------------|
+| Cors           | 支持跨域请求的中间件。                                                |
+| Resource       | 静态资源处理，是目前最强静态资源处理服务。                              |
+| ToFile         | 让上传的文件对象具备 `toFile` 方法。                                   |
+| SSE            | SSE协议中间件，基于HTTP的数据流推送。                                 |
+| Proxy          | 针对 HTTP/1.1 协议的反向代理，支持负载均衡和 alive 检测。               |
+| Http2Proxy     | HTTP/2 协议的反向代理，支持负载均衡和 alive 检测。                     |
+| SNI            | HTTPS 多域名支持。                                                    |
+| ParamCheck     | 请求参数检测，支持 `param`、`query`、`body` 的检测。                   |
+| JWT            | JWT 协议的 token 验证，推荐使用 Topbit.Token，比 JWT 强太多。          |
+| Cookie         | 解析前端请求的消息头 cookie。                                         |
+| Session        | Session 会话，使用的是本地文件机制。                                   |
+
+---
+
+以下是根据你提供的 `titbit-toolkit` 原始文档内容，按照新的列表顺序重新整理的文档。
+
+**注意**：
+*   根据指示，文档已针对新的 **Topbit** 框架语境进行了调整（即不再强调独立安装扩展）。
+*   列表中未包含的组件（如 `Timing`, `RealIP`, `MixLogger`, `SendType`, `SetFinal`, `Http2Limit`）已被移除。
+*   列表中包含但原文档未提供详细说明的组件（如 `SNI`），仅保留了描述占位符。
+
+---
+
+### 1. Cors (跨域支持)
+
+支持跨域请求的中间件。尽管是对跨域场景的支持，但在具备 `origin` 消息头的跨域通信和 `referer` 资源引入场景都做了支持，并且可以灵活选择和配置。
+
+**基本使用：**
+
+```javascript
+const Topbit = require('topbit')
+const {Cors} = Topbit.extensions
+
+let cr = new Cors({
+    // 默认为 * 表示全部开启跨域，
+    // 若要指定要支持的域名则需要传递一个数组。
+    // 注意：这里指定的是用于访问接口的应用页面所在域。
+    allow : [
+        'https://a.com',
+        'https://www.a.com',
+    ],
+
+    // 默认只有 content-type
+    allowHeaders : 'authorization,content-type',
+
+    // OPTIONS 请求缓存 60 秒，此期间浏览器请求会先去读取缓存。
+    optionsCache: 60,
+
+    // 默认为 '*'，可以设置允许的请求方法。
+    // requestHeaders : '*'
+
+    // 默认为 ''，表示哪些消息头可以暴露给请求端，多个消息头使用 , 分隔。
+    // exposeHeaders: 'x-test-key,x-type'
+})
+
+app.pre(cr)
+
+// 支持 OPTIONS 请求，浏览器在处理 POST/PUT/DELETE 时会先发送 OPTIONS 预检请求。
+// 必须处理 OPTIONS 请求才能完整支持跨域。
+app.options('/*', async c => {})
+```
+
+**高级配置（Referer检测与分组）：**
+
+```javascript
+let cr = new cors({
+  // 不允许 referer 为空
+  allowEmptyReferer: false,
+
+  // 允许 referer 为空的路由分组，
+  // 分组名称是自定义的，参考框架的路由分组功能。
+  // 此功能主要用于在 API 开发中还要兼顾页面的服务上。
+  emptyRefererGroup: [
+    '@webapp', '@pages'
+  ],
+
+  allow: [
+     // 默认的字符串形式表示 origin 跨域和 referer 外链接引用都被允许
+    'https://w.a.com',
+    'https://w.x.cn',
+
+    {url: 'https://servicewechat.com/wx234hiohr23', referer: true},
+    // 不应用于 referer 检测，如果有请求提交了 referer 为 self-define 不会通过检测
+    {url: 'self-define', referer: false}
+  ],
+})
+```
+
+---
+
+### 2. Resource (静态资源处理)
+
+静态资源处理服务，主要用于 JS、CSS、图片、音频等静态文件的托管。支持缓存控制、路由前缀修正等功能。
+
+**基本使用：**
+
+```javascript
+const Topbit = require('topbit')
+const {Resource} = Topbit.extensions
+
+let st = new Resource({
+    // 设定静态资源所在目录
+    staticPath: './public'
+})
+
+// 只对分组为 static 执行中间件。
+app.use(st, {group: 'static'})
+
+// 添加静态资源路由，假设 public 目录下有 css/a.css
+// 访问 /static/css/a.css 即可
+app.get('/static/*', async c => {
+    // 请求分组为 static
+}, '@static')
+```
+
+**快速示例与配置详解：**
+
+```javascript
+let st = new Resource({
+    // 设定静态资源所在目录
+    staticPath: './public',
+
+    // 路由路径：前端必须以 /static/ 开头，映射到 ./public 目录下的文件
+    routePath : '/static/*',
+
+    // 指定路由分组
+    routeGroup: '_static',
+
+    // 是否支持中文路径解码（默认 false）
+    decodePath: true,
+
+    // 前缀路径修正。如果设置为 xyz，会自动修正为 /xyz。
+    // prepath : '',
+
+    // 最大缓存文件大小，超过此大小则不会缓存（单位字节）
+    maxFileSize: 12_000_000,
+
+    // 设置消息头 cache-control 的值，默认为 null
+    cacheControl: 'max-age=3600',
+    
+    // 最大总缓存大小（默认 120MB）
+    maxCacheSize: 120_000_000,
+
+    // 失败限制次数与缓存释放概率
+    failedLimit: 50,
+    prob: 6
+})
+
+st.init(app)
+
+// 自动添加到 _static 分组。
+// 例如：public 目录中有 favicon.ico，通过此请求即可获取。
+app.get('/favicon.ico', async c => {}, {group: '_static'})
+```
+
+**接口说明：**
+*   `addType(obj)`: 添加扩展名到 content-type 的映射关系。
+*   `clearCache()`: 清理缓存。
+
+---
+
+### 3. ToFile (文件上传对象化)
+
+让上传的文件对象具备 `toFile` 方法，便于按照面向对象的风格保存文件。
+
+```javascript
+const Topbit = require('topbit')
+const {ToFile} = Topbit.extensions
+
+app.use( new ToFile() )
+
+app.post('/upload', async c => {
+    // 获取上传的文件对象
+    let f = c.getFile('image')
+
+    if (!f) {
+        return c.status(400).oo('image file not found')
+    }
+
+    // 把文件移动到 images 目录（需确保目录存在）。
+    // 第二个参数可选指定文件名，默认根据时间戳和随机数生成唯一文件名。
+    let fname = await f.toFile('./images')
+
+    // 返回文件名
+    c.ok(fname)
+})
+
+app.run(1234)
+
+```
+
+---
+
+### 4. SSE (服务端消息推送)
+
+基于 HTTP 协议的 Server Sent Events (SSE) 中间件，用于实现服务端主动向客户端推送数据流。
+
+**基本使用：**
+
+```javascript
+const Topbit = require('topbit')
+const {SSE} = Topbit.extensions
+
+let s = new SSE({
+  // 超时20秒，超过此时间后会自动关闭连接
+  timeout: 20000,
+
+  // 重新发起连接时间，默认值为0表示不再发起连接
+  retry: 5000,
+
+  // 定时器间隔，每隔2秒执行一次处理函数
+  timeSlice: 2000
+})
+
+// 设置处理函数，ctx 为请求上下文
+s.handle = (ctx) => {
+    // 发送单条消息
+    ctx.sendmsg({event: 'eat', data: '饭'})
+    
+    if (Date.now() % 5 === 0) {
+        // 发送多条消息，字符串或数字会自动转换为对应的消息格式，事件默认为 message
+        ctx.sendmsg([
+            {event: 'clock', data: Date.now()},
+            '但愿人长久，千里共婵娟。',
+            Math.random()
+        ])
+    }
+}
+
+// 只针对路由分组 sse 启用中间件
+app.use( s, {group: 'sse'} )
+
+app.get('/sse', async ctx => {}, {group: 'sse'})
+
+app.run(1234)
+
+```
+
+**生成器模式 (Generator Mode)：**
+适用于需要动态调整时间间隔或更精确控制的场景。
+
+```javascript
+let s = new SSE({
+  timeout: 20000,
+  retry: 5000,
+  timeSlice: 10,
+  mode: 'yield' // 开启生成器模式
+})
+
+s.handle = (ctx) => {
+    ctx.sendmsg({event: 'eat', data: '饭'})
+    // 使用 await ctx.sse.moment(ms) 进行延迟
+    await ctx.sse.moment(100)
+}
+```
+
+---
+
+### 5. Proxy (HTTP/1.1 反向代理)
+
+针对 HTTP/1.1 协议的反向代理，支持负载均衡和存活检测 (Alive Check)。
+
+**基本代理配置：**
+
+```javascript
+const Topbit = require('topbit')
+const {Proxy} = Topbit.extensions
+
+let hostcfg = {
+    // 简单映射：默认 path 为 /
+    'a.com' : 'http://localhost:8001',
+
+    // 指定路径映射
+    'b.com' : {
+        path : '/xyz',
+        url : 'http://localhost:8002'
+    },
+
+    // 复杂配置与重写
+    'c.com' : [
+        {
+            path : '/',
+            url : 'http://localhost:8004',
+            rewrite: (ctx, path) => {
+              // 自定义重写路由规则
+              if (path.indexOf('/xyz') === 0) {
+                return path.replace('/xyz', '/w')
+              }
+            }
+        }
+    ]
+};
+
+const pxy = new Proxy({
+    timeout: 10000,
+    config: hostcfg
+})
+
+pxy.init(app)
+
+app.run(1234)
+
+```
+
+**负载均衡配置：**
+通过配置数组实现，支持权重 (`weight`) 和存活检测。
+
+```javascript
+let load_balance_cfg = {
+    'a.com' : [
+        {
+            path : '/',
+            url : 'http://localhost:1234',
+            // 每3秒检测服务存活
+            aliveCheckInterval : 3,
+            aliveCheckPath : '/alive-check',
+            // 权重，数字越大权重越高
+            weight: 3
+        },
+        {
+            path : '/',
+            url : 'http://localhost:1235',
+            aliveCheckInterval : 3,
+            aliveCheckPath : '/ok',
+            weight: 2
+        }
+    ]
+}
+
+const pxy = new Proxy({
+    timeout: 10000,
+    starPath : true, // 开启后将代理路径后的字符串作为路径转发
+    config: load_balance_cfg
+})
+
+pxy.init(app)
+```
+
+---
+
+### 6. Http2Proxy (HTTP/2 反向代理)
+
+HTTP/2 协议的反向代理，参数与 `Proxy` 基本一致，利用 HTTP/2 连接机制进行保活。
+
+```javascript
+const Topbit = require('topbit')
+const {Http2Proxy} = Topbit.extensions
+
+let hxy = new Http2Proxy({
+  config: {
+    'a.com' : [
+      {
+        url: 'http://localhost:3001',
+        weight: 10,
+        path : '/',
+        reconnDelay: 200, // 重连延迟
+        max: 2,
+        headers: {
+          'x-test-key': `${Date.now()}`
+        },
+        connectTimeout: 2000
+      },
+      {
+        url: 'http://localhost:3002',
+        weight: 4,
+        path : '/'
+      }
+    ]
+  },
+  debug: true
+})
+
+hxy.init(app)
+
+app.run(1234)
+```
+
+---
+
+### 7. SNI (HTTPS 多域名支持)
+
+**描述**：用于在同一 IP 地址和端口上支持多个 HTTPS 域名证书的中间件。
+
+感谢提供源代码。根据代码逻辑，`SNI` 扩展通过 `init` 方法将 `SNICallback` 注入到应用的 `config.server` 配置中，从而利用 Node.js 原生 TLS 的能力实现多域名证书支持。
+
+以下是补全后的 **SNI** 文档部分：
+
+---
+
+### 7. SNI (HTTPS 多域名支持)
+
+**描述**：用于在同一 IP 地址和端口上支持多个 HTTPS 域名证书的中间件。它利用 TLS 协议的 Server Name Indication 特性，根据客户端请求的域名动态加载对应的 SSL 证书。
+
+**注意**：初始化时会同步读取证书文件，请确保路径正确。如果某个域名的证书读取失败，会在控制台输出错误信息，但不会阻塞其他域名的加载。
+
+**使用：**
+
+```javascript
+const Topbit = require('topbit')
+const {SNI} = Topbit.extensions
+
+const app = new Topbit({
+    // 启用 HTTPS，通常建议配置一组默认的 key 和 cert 作为回退
+    https: true,
+    key: './ssl/default.key',
+    cert: './ssl/default.cert',
+    debug: true
+})
+
+// 配置多域名证书
+// Key 为域名，Value 为包含 key 和 cert 路径的对象
+let certs = {
+    'a.com': {
+        key: './ssl/a.com.key',
+        cert: './ssl/a.com.cert'
+    },
+    'www.b.org': {
+        key: '/etc/nginx/ssl/b.org.key',
+        cert: '/etc/nginx/ssl/b.org.crt'
+    }
+}
+
+// 实例化并初始化
+let sni = new SNI(certs)
+
+// init 方法会将 SNICallback 注入到 app.config.server 中
+sni.init(app)
+
+app.run(443)
+```
+
+**参数说明**：
+*   构造函数接受一个对象，键名为**域名**，键值为配置对象。
+*   配置对象必须包含：
+    *   `key`: 私钥文件的路径。
+    *   `cert`: 证书文件的路径。
+
+---
+
+### 8. ParamCheck (请求参数检测)
+
+支持对 `param` (路由参数)、`query` (查询字符串)、`body` (请求体) 进行声明式检测。
+
+**Query 和 Param 检测：**
+
+```javascript
+const Topbit = require('topbit')
+const {ParamCheck} = Topbit.extensions
+
+// Query 参数检测
+let pck = new ParamCheck({
+  key: 'query',
+  data : {
+    // 严格限制值
+    say: 'hello',
+    // 类型转换与范围限制
+    offset: {
+      default: 0,
+      to: 'int',
+      min: 0,
+      max: 100
+    }
+  }
+})
+
+// Param 参数检测与自定义回调
+let paramck = new ParamCheck({
+  key: 'param',
+  deny: ['x-key'], // 禁止提交的字段
+  deleteDeny: true,
+  data : {
+    errorMessage: '参数错误', // 自定义错误信息
+    mobile: {
+      callback: (obj, k, method) => {
+        let preg = /^(12|13|15|16|17|18|19)[0-9]{9}$/
+        return preg.test(obj[k])
+      }
+    }
+  }
+})
+
+app.use(pck, {method: 'GET'})
+   .use(paramck, {method: 'GET'})
+```
+
+**Body 检测：**
+
+```javascript
+let pmbody = new ParamCheck({
+  key: 'body',
+  data: {
+    username: { must: true },
+    passwd: { must: true }
+  }
+})
+
+app.use(pmbody, {method: ['POST', 'PUT'], name: 'login'})
+```
+
+---
+
+### 9. JWT (Token 验证)
+
+JWT 协议的 Token 验证与签发。推荐使用 `Topbit.Token` 替代。
+
+```javascript
+const Topbit = require('topbit')
+const {JWT} = Topbit.extensions
+
+let j = new JWT({
+  timeout: 7200000, // 超时时间
+})
+j.alg = 'hs512' // 设置算法
+
+// 签发 Token
+let token = j.make({
+  id: '123we',
+  username: 'long'
+})
+
+// 验证 Token
+// 返回对象：{ ok: true, data: {...} } 或 { ok: false, errcode: '...' }
+let r = j.verify(token)
+
+// 作为中间件使用
+// 验证成功会将数据挂载到 ctx.box.user
+app.pre(j.mid()) 
+```
+
+---
+
+### 10. Cookie (Cookie 解析)
+
+解析前端请求消息头中的 Cookie，并在请求上下文中添加 `cookie` 属性。
+
+```javascript
+const Topbit = require('topbit')
+const {Cookie} = Topbit.extensions
+
+app.use( new Cookie() )
+
+app.get('/', async ctx => {
+  // 获取解析后的 cookie 对象
+  console.log(ctx.cookie)
+})
+
+app.run(1234)
+
+```
+
+---
+
+### 11. Session (会话管理)
+
+基于本地文件机制的 Session 会话管理，依赖 Cookie 组件。
+**注意**：此扩展主要用于测试和教学，生产环境建议使用 Redis 或其他数据库存储方案。
+
+```javascript
+const Topbit = require('topbit')
+const {Cookie,Session} = Topbit.extensions
+
+let sess = new Session()
+sess.init(app) // 初始化：添加 ctx 原型方法
+
+// 必须先启用 Cookie，再启用 Session
+app.use( new Cookie() ).use( sess )
+
+app.get('/:key/:data', async ctx => {
+  // 设置 Session
+  ctx.setSession(ctx.param.key, ctx.param.data)
+  
+  // 获取 Session (key 默认为 null 获取所有)
+  let data = ctx.getSession()
+  
+  ctx.ok(data)
+})
+
+app.run(1234)
+
+// 其他方法：
+// ctx.delSession(key) - 删除指定 Session
+// ctx.clearSession()  - 清空 Session
+```
+
+---
+
+## ⌨️命令参数解析
+
+**用于快速解析process.argv。**
+
+
+### 使用示例
+
+```javascript
+
+'use strict'
+
+const Topbit = require('Topbit')
+const parseArgv = Topbit.npargv
+
+let ret = parseArgv({
+  '--port=' : {
+    name: 'port',
+    //别名
+    alias: '-p',
+    type: 'int',
+    min: 2000,
+    max: 2100
+  },
+
+  '--host=' : {
+    name: 'host',
+    match: /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/i
+  },
+
+  '-w' : {
+    name: 'worker',
+    type: 'int',
+    min: 1,
+    max: 4,
+    //若设置了默认值，则在参数不合法时会自动使用默认值不会返回错误信息。
+    default: 2
+  },
+
+  '--https': {
+    name: 'https'
+  },
+
+  '--http2': {
+    name: 'http2'
+  },
+
+  '--test': {
+    name: 'test'
+  },
+
+  '--id' : {
+    name : 'id',
+    callback: (str) => {
+      return str.split(',').filter(p => p.length > 0)
+    }
+  },
+
+  //自动转换为{type: 'bool', name: 'limit'}
+  '--limit' : 'limit',
+
+  //自动转换为{type: 'bool', name: '-x'}
+  '-x' : false
+
+})
+
+console.log(ret)
+
+```
+
+运行命令参数：
+
+```shell
+$ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,5 --local a b c
+```
+
+运行输出结果：
+
+```javascript
+{
+  ok: true,
+  errmsg: '',
+  args: {
+    worker: 2,
+    https: true,
+    http2: true,
+    test: true,
+    limit: false,
+    host: '1.2.3.4',
+    port: 2010,
+    id: [ '1', '2', '3', '4', '5' ],
+    '--local': true,
+    '-x': false
+  },
+  // 不是参数，也不是-开头的会放在list中，方便获取。
+  // 如果存在位置引用的参数，则会优先解析，所以x没有在list中。
+  list: ['a', 'b', 'c']
+}
+
+```
+
+解析后的结果，若ok为false，则errmsg会给出错误提示信息。若参数无错误，则args是解析后的参数对象。
+
+解析过程中，若参数不在传递的对象描述信息内，仍然会在args中体现，key值即为参数的名字，可以参考示例中的--local。
+
+如果对参数的描述信息不是object类型，则会转换为boolean类型，此时name值即为参数的名字。参考-x参数。
+
+**若没有给定type限定范围，则会根据描述自动设定type，这可能会有错误判断，所以尽可能给定type限定。**
+
+**type推断规则如下：**
+
+- 若参数含有=，比如--port=，则type为string类型。
+
+- 否则，若描述对象具备match或callback，则为string类型。
+
+- 否则，若描述对象含有min或max则为int类型。
+
+- 否则，若描述对象具备default，则如果default是数字或字符串类型，type和default类型一致。
+
+- 否则，type为bool。
+
+**type支持类型如下：**
+
+- int 或 number，整数类型。
+
+- float，浮点数类型。
+
+- string，字符串类型。
+
+- bool或boolean，布尔类型。
+
+### 参数描述的选项
+
+| 选项 | 是否必须 | 描述 |
+| ---- | ---- | ---- |
+| type | 否 | 参数类型，若不给定则会根据描述信息自动设定。 |
+| name | 否 | 解析后参数的名字，就是解析后参数对象的key值。若不给定则使用参数名称。 |
+| min | 否 | 限制最小值。 |
+| max | 否 | 限制最大值。 |
+| default | 否 | 默认值，若设置，则检测到传递的参数不合法，会采用默认值不会返回错误信息。对于bool来说，default无效。默认值为false。 |
+| match | 否 | 正则表达式，若给定，会进行正则匹配。 |
+| callback | 否 | 函数，若给定，会把参数值传递到函数，若函数返回值不是undefined，则作为最后解析的值。 |
+
+### autoDefault自动设定默认值
+
+在程序解析过程中，有时候需要必须返回参数，不合法则使用默认值，这需要对每个选项都使用default属性，或者使用\@autoDefault让npargv自动设定默认值。
+
+```javascript
+'use strict'
+
+const Topbit = require('Topbit')
+const parseArgv = Topbit.npargv
+
+let opts = {
+  //启用自动设定默认值。
+  '@autoDefault' : true,
+
+  //没有设定默认值，会自动设定默认值为min的值。
+  '--port' : {
+    min: 1234,
+    max: 5678
+  },
+
+  //没有default设定默认值，类型为数字也没有min的限制，会自动设置为0
+  '-x' : {
+    type : 'int'
+  }
+
+
+}
+
+let {args} = parseArgv(opts)
+
+```
+
+自动设定默认值的规则：
+
+- 若type为bool则默认值为false
+
+- 若type为string，则默认值为 空字符串。
+
+- 若type为number、int、float，则默认值为min属性给定的值，若没有min则默认值为0。
+
+### 第一个参数作为子命令
+
+```javascript
+
+let argscfg = {
+    //定义支持的子命令
+    '@command' : [
+        'create', 'show', 'update', 'delete'
+    ],
+
+    //当不输入时，默认的命令
+    '@defaultCommand': 'show'
+}
+
+
+```
+
+### 位置引用参数
+
+以 $ 加数字作为key值即表示这是一个位置相关的参数，在解析过程中会先进行位置引用参数的解析。
+
+但是位置的索引数字和实际内部的索引有差异：
+
+- 索引位置从1开始。
+
+- 索引位置是参数值，不会包括命令名称。
+
+- 如果设定了@command，则位置1会自动在解析时从command后开始。
+
+注意：@command表示的是第一个参数，用于脚本的子命令功能。
+
+```javascript
+const Topbit = require('Topbit')
+const npargv = Topbit.npargv
+
+let {args} = npargv({
+    '@autoDefault': true,
+    '$1': {
+        type: 'string',
+    },
+    '$2': {
+        type: 'string',
+        callback: (v) => {
+            return ['i', 'o', 'v'].indexOf(v) >= 0 ? v : 'o'
+        }
+    }
+})
+
+```
+
+---
+
+## 🤖Loader(服务加载器)
+
+TopbitLoader 是 Topbit 框架官方推荐的「自动化加载器」扩展，彻底告别手动 `app.get()`、`app.use()` 的繁琐写法。
+
+它实现了真正的 **MCM 模式**（Middleware → Controller → Model），类似 MVC 但更轻量、更符合 Topbit 的极致性能哲学。
+
+[🌐查看详细文档☛](./docs/topbit-loader.md)
+
+---
+
+## 🔐Token(会话验证)🪙
+
+TopbitToken 是专为 Topbit 框架打造的零依赖、极简、高安全的加密用户凭证（Token）系统。
+
+它完全基于 Node.js 原生 `crypto` 实现，支持：
+
+- AES-256-GCM（默认，推荐）
+- AES-192-GCM / AES-128-CBC / AES-256-CBC
+- 国密 SM4-CBC
+
+[🌐查看详细文档☛](./docs/topbit-token.md)
+
+---
