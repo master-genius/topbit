@@ -5,6 +5,8 @@ const os = require('node:os');
 const fs = require('node:fs');
 const process = require('node:process');
 
+const hrtime = process.hrtime
+
 class Monitor {
 
   constructor(options) {
@@ -15,6 +17,8 @@ class Monitor {
 
     this.workerCount = options.workerCount
 
+    this.isLoadObj = ['obj', 'orgobj'].includes(this.config.loadInfoType)
+
     this.rundata.cpus = os.cpus().length
 
     this.loadCount = 0
@@ -24,9 +28,9 @@ class Monitor {
 
     this.loadCache = null
 
-    this.cpuLastTime = Date.now() - 1
+    this.cpuLastTime = hrtime.bigint() - 1n
 
-    this.cpuNowTime = Date.now()
+    this.cpuNowTime = hrtime.bigint()
 
     //this.cpuPercentFactor = 10 * this.rundata.cpus;
     this.cpuHighRatio = 0
@@ -45,9 +49,35 @@ class Monitor {
 
     this.life = 20
 
-    this.maxRate = parseInt(this.config.maxLoadRate * 10)
+    this.maxRate = this.config.maxLoadRate
 
     this.loadfd = null
+
+    this.ipcMsgCache = {
+      type: '_load',
+      pid: 0,
+      cpu: null,
+      cputm: 0,
+      mem: null,
+      conn: 0
+    }
+
+     this.loadjson = {
+        masterPid : process.pid,
+        listen : `${this.rundata.host}:${this.rundata.port}`,
+        CPULoadavg : {
+          '1m' : '0',
+          '5m' : '0',
+          '15m' : '0'
+        },
+        https: this.config.https,
+        http2: this.config.http2,
+        workers : []
+    }
+
+    queueMicrotask(() => {
+      this.loadjson.listen = `${this.rundata.host}:${this.rundata.port}`
+    })
 
   }
 
@@ -65,20 +95,20 @@ class Monitor {
       for (let k in this.workers) {
         cpuratio = (this.workers[k].cpu.user + this.workers[k].cpu.system) / this.workers[k].cputm
 
-        if (cpuratio >= this.maxRate) {
-          this.cpuHighRatio += 1
+        if (cpuratio > this.maxRate) {
+          this.cpuHighRatio++
         } else {
           if (this.cpuHighRatio > 0) {
-            this.cpuHighRatio -= 1
+            this.cpuHighRatio--
           }
+
           break
         }
       }
     }
 
     if (this.cpuHighRatio >= this.workerCount.cur) {
-      
-      this.cpuHighRatio -= 1
+      this.cpuHighRatio--
 
       if (this.workerCount.cur < this.workerCount.max) {
         if (this.workerCount.canAutoFork) {
@@ -106,7 +136,7 @@ class Monitor {
 
       if (this.workerCount.cur > this.workerCount.total) {
         if (this.cooling > 0) {
-          this.cooling -= 1
+          this.cooling--
         } else {
           for (let k in this.workers) {
             if (this.workers[k].conn === 0) {
@@ -169,12 +199,16 @@ class Monitor {
       if (will_disconnect) return;
 
       this.cpuLastTime = this.cpuNowTime
-      this.cpuNowTime = Date.now()
+      this.cpuNowTime = hrtime.bigint()
+      let diffNs = this.cpuNowTime - this.cpuLastTime
+      let diffUs = (Number(diffNs) / 1000) + 0.01
 
+      //此处是计算微秒的cpu变化，而计算负载正好按照微秒进行
       this.rundata.cpuTime = process.cpuUsage(this.rundata.cpuLast)
+
       if (mem_count < MAX_MEM_COUNT) {
         this.rundata.mem.rss = process.memoryUsage.rss()
-        mem_count += 1
+        mem_count++
       } else {
         this.rundata.mem = process.memoryUsage()
         mem_count = 0
@@ -182,16 +216,17 @@ class Monitor {
 
       this.rundata.mem.total = this.rundata.mem.rss + this.rundata.mem.external
 
-      process.send({
-        type : '_load',
-        pid  : process.pid,
-        cpu  : this.rundata.cpuTime,
-        cputm : this.cpuNowTime - this.cpuLastTime,
-        mem  : this.rundata.mem,
-        conn : this.rundata.conn
-      }, err => {
-        err && this.config.errorHandle(err, '--ERR-WORKER-SEND--')
-        //if (err.code === 'ERR_IPC_CHANNEL_CLOSED') {}
+      const msg = this.ipcMsgCache
+      msg.pid = process.pid
+      msg.cpu = this.rundata.cpuTime
+      msg.cputm = diffUs
+      msg.mem = this.rundata.mem
+      msg.conn = this.rundata.conn
+
+      process.send(msg, err => {
+        if (err) this.config.errorHandle(err, '--ERR-WORKER-SEND--')
+        // 忽略管道关闭错误
+        //if (err && err.code !== 'ERR_IPC_CHANNEL_CLOSED') {}
       })
 
       this.rundata.cpuLast = process.cpuUsage()
@@ -201,7 +236,7 @@ class Monitor {
   }
 
   showLoadInfo(w, id) {
-    if (this.config.loadInfoType == '--null') {
+    if (!this.config.loadInfoType || this.config.loadInfoType === 'null') {
       return
     }
   
@@ -225,31 +260,30 @@ class Monitor {
   
     this.loadCount += 1;
     if (this.loadCount < this.workerCount.cur) {
-      return ;
+      return
     }
     
-    let loadText = this.fmtLoadInfo( this.config.loadInfoType );
+    let load_info = this.fmtLoadInfo(this.config.loadInfoType);
 
     if (this.config.loadInfoFile === '--mem') {
-      this.loadCache = loadText;
-    }
-    else if (this.loadfd !== null) {
-
-      fs.write(this.loadfd, loadText, 0, (err, bytes, data) => {
-        err && this.config.debug && this.config.errorHandle(err, '--ERR-WRITE-FILE--');
-        if (!err) {
-          fs.ftruncate(this.loadfd, bytes, e => {});
-        }
-      });
-      
+      this.loadCache = load_info;
+    } else if (this.loadfd !== null) {
+      fs.write(this.loadfd, this.isLoadObj ? JSON.stringify(load_info) : load_info, 0,
+          (err, bytes, data) => {
+              if (err && this.config.debug) this.config.errorHandle(err, '--ERR-WRITE-FILE--');
+              
+              if (!err) {
+                fs.ftruncate(this.loadfd, bytes, e => {});
+              }
+          }
+      );
     } else if (process.ppid > 1 && !this.config.daemon && !this.config.loadInfoFile) {
       console.clear();
       //只有没有开启守护进程才会输出到屏幕
-      console.log(loadText);
+      console.log(load_info);
     }
   
     this.loadCount = 0;
-  
   }
 
   checkMem(w, msg) {
@@ -292,26 +326,16 @@ class Monitor {
       let p = null;
   
       for (let id in this.workers) {
-        
         p = this.workers[id];
-  
         tmp = [(`${p.pid}`).padEnd(9, ' ')];
-  
         t = p.cpu.user + p.cpu.system;
-
-        tmp.push((( t/(p.cputm * 10) ).toFixed(2) + '%').padEnd(8, ' '),
-
-          (`${p.conn}`).padEnd(8, ' '),
-  
-          (p.mem.rss / 1048576).toFixed(1).padEnd(8, ' '),
-
-          (p.mem.heapTotal / 1048576).toFixed(1).padEnd(8, ' '),
-
-          (p.mem.heapUsed / 1048576).toFixed(1).padEnd(8, ' '),
-
-          (p.mem.external / 1048576).toFixed(1).padEnd(9, ' '),
-
-          (p.mem.total / 1048576).toFixed(1)
+        tmp.push((( t * 100 / p.cputm ).toFixed(2) + '%').padEnd(8, ' '),
+            (`${p.conn}`).padEnd(8, ' '),
+            (p.mem.rss / 1048576).toFixed(1).padEnd(8, ' '),
+            (p.mem.heapTotal / 1048576).toFixed(1).padEnd(8, ' '),
+            (p.mem.heapUsed / 1048576).toFixed(1).padEnd(8, ' '),
+            (p.mem.external / 1048576).toFixed(1).padEnd(9, ' '),
+            (p.mem.total / 1048576).toFixed(1)
         );
   
         cols.push(tmp.join(''));
@@ -323,56 +347,44 @@ class Monitor {
           +`HTTPS: ${this.config.https ? 'true' : 'false'}; HTTP/2: ${this.config.http2 ? 'true' : 'false'}\n`;
     }
   
-    if (type === 'json') {
-      let loadjson = {
-        masterPid : process.pid,
-        listen : `${this.rundata.host}:${this.rundata.port}`,
-        CPULoadavg : {
-          '1m' : oavg[0].toFixed(2),
-          '5m' : oavg[1].toFixed(2),
-          '15m' : oavg[2].toFixed(2)
-        },
-        https: this.config.https,
-        http2: this.config.http2,
-        workers : []
-      };
+    if (type === 'obj') {
+      let lj = this.loadjson
+      lj.CPULoadavg['1m'] = oavg[0].toFixed(2)
+      lj.CPULoadavg['5m'] = oavg[1].toFixed(2)
+      lj.CPULoadavg['15m'] = oavg[2].toFixed(2)
+      lj.workers = []
+
       for (let id in this.workers) {
         p = this.workers[id];
   
-        loadjson.workers.push({
-          pid : p.pid,
-          cpu : `${((p.cpu.user + p.cpu.system)/ (p.cputm * 10) ).toFixed(2)}%`,
-          cputm : p.cputm,
-          mem : {
+        lj.workers.push({
+          pid: p.pid,
+          cpu: `${((p.cpu.user + p.cpu.system) * 100 / p.cputm).toFixed(2)}%`,
+          cputm: p.cputm,
+          mem: {
             rss : (p.mem.rss / 1048576).toFixed(1),
             heap : (p.mem.heapTotal / 1048576).toFixed(1),
             heapused : (p.mem.heapUsed / 1048576).toFixed(1),
             external :  (p.mem.external / 1048576).toFixed(1),
           },
           conn : p.conn
-        });
+        })
       }
-      return JSON.stringify(loadjson);
+
+      return lj
     }
   
-    if (type === 'orgjson') {
-      let loadjson = {
-        masterPid : process.pid,
-        listen : `${this.rundata.host}:${this.rundata.port}`,
-        CPULoadavg : {
-          '1m' : oavg[0].toFixed(2),
-          '5m' : oavg[1].toFixed(2),
-          '15m' : oavg[2].toFixed(2)
-        },
-        https: this.config.https,
-        http2: this.config.http2,
-        workers : this.workers
-      };
+    if (type === 'orgobj') {
+      let lj = this.loadjson
+      lj.CPULoadavg['1m'] = oavg[0].toFixed(2)
+      lj.CPULoadavg['5m'] = oavg[1].toFixed(2)
+      lj.CPULoadavg['15m'] = oavg[2].toFixed(2)
+      lj.workers = this.workers
 
-      return JSON.stringify(loadjson);
+      return lj
     }
     
-    return '';
+    return null
   }
 
 }
