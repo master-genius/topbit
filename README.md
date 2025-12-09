@@ -1543,14 +1543,6 @@ app.run(1235)
 
 ---
 
-The following documentation is reorganized based on the original `titbit-toolkit` documentation you provided, adapted for the new list order.
-
-**Note**:
-*   The documentation has been adjusted for the **Topbit** framework context (no longer emphasizing standalone installation of extensions).
-*   Components not included in the list above have been removed.
-
----
-
 ### 1. Cors (Cross-Origin Support)
 
 Middleware that supports cross-origin requests. It supports cross-origin communication via the `origin` header as well as resource inclusion via `referer`, allowing for flexible selection and configuration.
