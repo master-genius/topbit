@@ -1,7 +1,7 @@
 'use strict'
 
 const http2 = require('node:http2')
-const Http2Pool = require('./Http2Pool')
+const Http2Pool = require('./Http2Pool.js')
 
 let error_502_text = `<!DOCTYPE html><html>
       <head>
@@ -50,6 +50,19 @@ function fmtpath(path) {
   }
 
   return `${path}*`
+}
+
+// 主机名提取 (IPv6 兼容优化版)
+function extractHostname(host) {
+  if (!host) return ''
+  if (host.charCodeAt(0) === 91) { // '[' IPv6
+      const end = host.indexOf(']')
+      return end > -1 ? host.substring(0, end + 1) : host
+  }
+  const idx = host.indexOf(':')
+  if (idx === -1) return host
+  if (host.indexOf(':', idx + 1) !== -1) return host // 裸 IPv6
+  return host.substring(0, idx)
 }
 
 let Http2Proxy = function (options = {}) {
@@ -188,8 +201,8 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
 
   }
 
-  if (tmp.max && typeof tmp.max === 'number' && tmp.max > 1)
-    backend_obj.max = tmp.max
+  if (tmp.maxConnect && typeof tmp.maxConnect === 'number' && tmp.maxConnect > 1)
+    backend_obj.maxConnect = tmp.maxConnect
 
   if (tmp.debug !== undefined) backend_obj.debug = tmp.debug
 
@@ -244,8 +257,7 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         weight: 1,
         weightCount: 0,
         reconnDelay: 500,
-        max: 50,
-        maxConnect: tmp.maxConnect || 0,
+        maxConnect: tmp.maxConnect || 10,
         debug: this.debug,
         h2Pool: null,
         timeout: this.timeout,
@@ -268,7 +280,6 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
 
       backend_obj.h2Pool = new Http2Pool({
         debug: backend_obj.debug,
-        max: backend_obj.max,
         url: backend_obj.url,
         connectOptions: backend_obj.connectOptions,
         parent: backend_obj,
@@ -338,23 +349,6 @@ Http2Proxy.prototype.getBackend = function (c, host) {
     }
   }
 
-  if (!pr.alive) {
-    pr.h2Pool && pr.h2Pool.delayConnect()
-
-    for (let i = prlist.length - 1; i >= 0 ; i--) {
-      
-      pr = prlist[i]
-
-      if (pr.alive) {
-        return pr
-      } else {
-        pr.h2Pool && pr.h2Pool.delayConnect()
-      }
-    }
-
-    return null
-  }
-
   return pr
 }
 
@@ -401,22 +395,7 @@ Http2Proxy.prototype.mid = function () {
 
   return async (c, next) => {
 
-    let host = c.host
-    
-    let hind = c.host.length - 1
-
-    if (hind > 4) {
-      let eind = hind - 5
-
-      while (hind >= eind) {
-        if (c.host[hind] === ':') {
-          host = c.host.substring(0, hind)
-          break
-        }
-  
-        hind--
-      }
-    }
+    let host = extractHostname(c.host)
 
     if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
       if (self.full) {
@@ -427,25 +406,7 @@ Http2Proxy.prototype.mid = function () {
     }
 
     let pr = self.getBackend(c, host)
-
-    if (!pr) {
-      pr = self.getBackend(c, host)
-
-      if (!pr) {
-        await c.ext.delay(9)
-        pr = self.getBackend(c, host)
-
-        if (!pr) {
-          for (let i = 0; i < 200; i++) {
-            await c.ext.delay(6 + i)
-            pr = self.getBackend(c, host)
-            if (pr) break
-          }
-        }
-
-        if (!pr) return c.status(503).to(error_503_text)
-      }
-    }
+    if (!pr) return c.status(503).to(error_503_text)
 
     if (self.addIP && c.headers['x-real-ip']) {
       c.headers['x-real-ip'] += `,${c.ip}`
@@ -454,7 +415,6 @@ Http2Proxy.prototype.mid = function () {
     }
 
     let hii = pr.h2Pool
-    let session_client
 
     try {
       if (pr.headers) {
@@ -462,29 +422,18 @@ Http2Proxy.prototype.mid = function () {
       }
 
       if (pr.rewrite) {
-        let rpath = pr.rewrite(c, c.major >= 2 ? c.headers[':path'] : c.request.url)
+        let rpath = pr.rewrite(c, c.major > 1 ? c.headers[':path'] : c.req.url)
 
         if (rpath) {
           let path_typ = typeof rpath
           if (path_typ === 'object' && rpath.redirect) {
             return c.setHeader('location', rpath.redirect)
           } else if (path_typ === 'string') {
-            c.headers[':path'] = rpath
+            if (c.major > 1)
+              c.headers[':path'] = rpath
+            else c.req.url = rpath
           }
         }
-      }
-
-      session_client = await hii.getSession()
-
-      if (session_client.deny) {
-        for (let i = 0; i < 50; i++) {
-          await c.ext.delay(5 + i)
-          session_client = await hii.getSession()
-          if (!session_client.deny) break
-        }
-
-        if (session_client.deny)
-          return c.status(429).to('服务繁忙，请稍后再试')
       }
 
       await new Promise(async (rv, rj) => {
@@ -493,41 +442,17 @@ Http2Proxy.prototype.mid = function () {
         let request_stream = c.stream
         let stm = null
         
-        stm = await hii.request(
-                            c.major === 2 ? c.headers : this.fmtHeaders(c.headers, c),
-                            session_client
-                          ).catch(err => {
-                            rejected = true
-                            rj(err)
-                            stm = null
-                          })
+        stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
+                      .catch(err => {
+                          rejected = true
+                          rj(err)
+                          stm = null
+                      })
 
         if (!stm) {
           rj(new Error('request failed'))
           return false
         }
-
-        let timeout_handler = () => {
-          timeout_timer = null
-
-          //强制的异常结束，这意味着session的其他stream也会出现问题。
-          try {
-            !stm.closed && stm.close(http2.constants.NGHTTP2_CANCEL)
-            stm.destroy()
-            if (session_client.session && !session_client.session.destroyed) {
-              session_client.session.destroy()
-            }
-          } catch(e) {}
-
-          if (!resolved && !rejected) {
-            rejected = true
-            rj(new Error('force destroy stream, request timeout'))
-          }
-        }
-
-        session_client.aliveStreams++
-
-        let timeout_timer = setTimeout(timeout_handler, pr.timeout + 5000)
 
         c.stream.on('timeout', () => {
           stm.close(http2.constants.NGHTTP2_CANCEL)
@@ -541,11 +466,6 @@ Http2Proxy.prototype.mid = function () {
         })
 
         c.stream.on('error', err => {
-          if (timeout_timer) {
-            clearTimeout(timeout_timer)
-            timeout_timer = null
-          }
-
           stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
           stm.destroy()
         })
@@ -562,11 +482,6 @@ Http2Proxy.prototype.mid = function () {
         })
 
         stm.on('aborted', err => {
-          if (timeout_timer) {
-            clearTimeout(timeout_timer)
-            timeout_timer = null
-          }
-
           !stm.destroyed && stm.destroy()
 
           if (!resolved && !rejected) {
@@ -576,13 +491,6 @@ Http2Proxy.prototype.mid = function () {
         })
 
         stm.on('close', () => {
-          if (timeout_timer) {
-            clearTimeout(timeout_timer)
-            timeout_timer = null
-          }
-
-          stm.removeAllListeners()
-
           if (stm.rstCode === http2.constants.NGHTTP2_NO_ERROR) {
             if (!resolved && !rejected) {
               resolved = true
@@ -594,13 +502,9 @@ Http2Proxy.prototype.mid = function () {
               rj(new Error(`stream close, exit code ${stm.rstCode}`))
             }
           }
-
-          session_client.aliveStreams--
         })
 
         stm.on('response', (headers, flags) => {
-          timeout_timer && clearTimeout(timeout_timer)
-          timeout_timer = setTimeout(timeout_handler, pr.timeout + 5000)
           if (c.res && c.res.writable) {
             if (c.res.respond) {
               c.res.respond(headers)
@@ -636,25 +540,21 @@ Http2Proxy.prototype.mid = function () {
           stm.end()
         })
 
-        let data_count = 0
-        stm.on('data', chunk => {
-          data_count++
-          c.res && c.res.writable && c.res.write(chunk)
+        const onDrain = () => stm.resume()
+        if (c.res) c.res.on('drain', onDrain)
 
-          if (data_count >= 111) {
-            data_count = 0
-            timeout_timer && clearTimeout(timeout_timer)
-            timeout_timer = setTimeout(timeout_handler, pr.timeout + 5000)
+        stm.on('data', chunk => {
+          if (c.res && c.res.writable) {
+            if (c.res.write(chunk) === false) {
+              stm.pause()
+            }
           }
         })
 
         stm.on('end', () => {
-          if (timeout_timer) {
-            clearTimeout(timeout_timer)
-            timeout_timer = null
-          }
-
-          stm.close()
+          if (c.res) c.res.removeListener('drain', onDrain)
+          
+          !stm.closed && stm.close()
 
           if (!resolved && !rejected) {
             resolved = true
@@ -666,8 +566,6 @@ Http2Proxy.prototype.mid = function () {
     } catch (err) {
       self.debug && console.error(err||'request null error')
       c.status(503).to(error_503_text)
-    } finally {
-      session_client = null
     }
 
   }
