@@ -1882,7 +1882,7 @@ let hxy = new Http2Proxy({
         weight: 10,
         path : '/',
         reconnDelay: 200, // Reconnection delay
-        max: 2,
+        maxConnect: 2,
         headers: {
           'x-test-key': `${Date.now()}`
         },
