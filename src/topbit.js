@@ -164,7 +164,7 @@ class Topbit {
    * - maxFormLength 在multipart/form-data类型提交数据时，单个form项的最大值，默认为1000000字节。
    * - errorHandle 收集错误并处理的函数，默认是输出错误信息，接收参数为两个，第一个是错误信息，第二个是错误的名字描述。
    * - ignoreSlash 忽略末尾的/，默认为true。
-   * - maxLoadRate 在自动创建子进程平衡负载模式，最大子进程负载率限制：25 ～ 98表示百分比。
+   * - maxLoadRate 在自动创建子进程平衡负载模式，最大子进程负载率限制：0.15 ～ 0.98。
    * - streamTimeout http2Stream超时，若不设置，默认采用timeout的设置。
    */
   constructor(options={}) {
@@ -272,7 +272,7 @@ class Topbit {
   
       requestTimeout: 65_000,
   
-      maxLoadRate: 75
+      maxLoadRate: 0.75
     };
   
     this.whoami = 'topbit';
@@ -343,11 +343,11 @@ class Topbit {
           break;
   
         case 'monitorTimeSlice':
-          optionsCheck(k, options[k], this.config, {type: 'number', min: 5, max: 5000});
+          optionsCheck(k, options[k], this.config, {type: 'number', min: 5, max: 10000});
           break;
-  
+
         case 'maxLoadRate':
-          optionsCheck(k, options[k], this.config, {type: 'number', min: 25, max: 98});
+          optionsCheck(k, options[k], this.config, {type: 'number', min: 0.15, max: 0.98});
           break;
   
         case 'maxFiles':
@@ -364,13 +364,13 @@ class Topbit {
         case 'logHistory':
           optionsCheck(k, options[k], this.config, {type: 'number', min: 1});
           break;
-  
+
         case 'logType':
           optionsCheck(k, options[k], this.config, {list: ['stdio','file', '']});
           break;
         
         case 'loadInfoType':
-          optionsCheck(k, options[k], this.config, {list: ['--null', 'text', 'json', 'orgjson']});
+          optionsCheck(k, options[k], this.config, {list: [null, 'null', 'text', 'obj', 'orgobj']});
           break;
   
         case 'loadMonitor':
@@ -1110,7 +1110,7 @@ class Topbit {
           total: 0
         },
         cpu: {user:0, system:0},
-        cputm : 1000
+        cputm : 1000000
       };
       
     });
