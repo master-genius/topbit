@@ -1,8 +1,21 @@
 'use strict';
 
-const titbit = require('../src/topbit.js');
+const Topbit = require('../src/topbit.js');
+const npargv = Topbit.npargv
 
-const app = new titbit({
+let {args} = npargv({
+  '--loadtype': {
+    name: 'load',
+    default: 'text',
+    limit: ['text', 'json', 'orgjson']
+  },
+  '--loadstdio': {
+    name: 'loadstdio',
+    default: false
+  }
+})
+
+const app = new Topbit({
     debug : true,
     allow : new Set(['127.0.0.1']),
     maxIPRequest: 2,
@@ -10,11 +23,11 @@ const app = new titbit({
     useLimit: true,
     maxConn: 2000,
     //http2: true,
-    showLoadInfo: true,
-    loadInfoType : 'text',
+    loadMonitor: true,
+    loadInfoType : args.load,
     globalLog : true,
     logType: 'stdio',
-    loadInfoFile : '/tmp/loadinfo.log'
+    loadInfoFile : args.loadstdio ? '' : '/tmp/loadinfo.log',
 });
 
 app.use(async (c, next) => {
@@ -65,7 +78,12 @@ app.get('/', async c => {
 }, 'home');
 
 app.get('/test', async c => {
-    c.to(c.name);
+    //await c.ext.delay(10)
+    let sum = 0
+    for (let i = 0; i < 1000000; i++) {
+        sum += Math.random() * i;
+    }
+    c.to({sum});
 }, {group: 'test', name : 'test'});
 
 app.post('/test', async c => {
@@ -95,4 +113,6 @@ app.use(async (c, next) => {
 }, {pre: true, method: 'POST', name: 'transmit'});
 
 
-app.daemon(2034, 2);
+app.autoWorker(3)
+
+app.daemon(2034, 1)
