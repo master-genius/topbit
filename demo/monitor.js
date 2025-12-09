@@ -12,10 +12,13 @@ let {args} = npargv({
   '--loadstdio': {
     name: 'loadstdio',
     default: false
+  },
+
+  '--http2': {
+    name: 'http2',
+    default: false
   }
 })
-
-console.log(args)
 
 const app = new Topbit({
     debug : true,
@@ -24,7 +27,7 @@ const app = new Topbit({
     unitTime: 10,
     useLimit: true,
     maxConn: 2000,
-    //http2: true,
+    http2: args.http2,
     loadMonitor: true,
     loadInfoType : args.loadtype,
     globalLog : false,

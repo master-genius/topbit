@@ -1,6 +1,6 @@
 'use strict'
 
-const Titbit = require('../lib/titbit.js')
+const Titbit = require('../src/topbit.js')
 
 let app = new Titbit({
   debug: true,
