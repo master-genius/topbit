@@ -915,7 +915,7 @@ app.run(1234)
     //展示负载信息，需要通过daemon接口开启cluster集群模式
     loadMonitor : true,
 
-    //负载信息的类型，text 、json、--null
+    //负载信息的类型，text 、null, obj, orgobj
     //json类型是给程序通信使用的，方便接口开发
     loadInfoType : 'text',
 

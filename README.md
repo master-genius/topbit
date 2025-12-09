@@ -879,7 +879,7 @@ Full configuration options for app initialization are as follows. Please read th
     // Display load info, requires enabling cluster mode via daemon interface
     loadMonitor : true,
 
-    // Load info type: text, json, --null
+    // Load info type: text, null, obj, orgobj
     // json type is for program communication, convenient for interface development
     loadInfoType : 'text',
 
