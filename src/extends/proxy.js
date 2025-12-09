@@ -4,6 +4,20 @@ const urlparse = require('node:url');
 const http = require('node:http');
 const https = require('node:https');
 
+// 主机名提取 (IPv6 兼容优化版)
+function extractHostname(host) {
+  if (!host) return ''
+  if (host.charCodeAt(0) === 91) { // '[' IPv6
+      const end = host.indexOf(']')
+      return end > -1 ? host.substring(0, end + 1) : host
+  }
+  const idx = host.indexOf(':')
+  if (idx === -1) return host
+  if (host.indexOf(':', idx + 1) !== -1) return host // 裸 IPv6
+  return host.substring(0, idx)
+}
+
+
 /**
  * {
  *    host : {}
@@ -406,22 +420,7 @@ class Proxy {
 
     return async (c, next) => {
 
-      let host = c.host
-
-      let hind = c.host.length - 1
-
-      if (hind > 4) {
-        let eind = hind - 5
-  
-        while (hind >= eind) {
-          if (c.host[hind] === ':') {
-            host = c.host.substring(0, hind)
-            break
-          }
-    
-          hind--
-        }
-      }
+      let host = extractHostname(c.host)
       
       if (self.hostProxy[host]===undefined || self.hostProxy[host][c.routepath]===undefined) {
         if (self.full) {
@@ -433,7 +432,7 @@ class Proxy {
       let pr = self.getBackend(c, host)
 
       if (pr === null) {
-        for (let i = 0; i < 200; i++) {
+        for (let i = 0; i < 50; i++) {
           await new Promise((rv, rj) => {setTimeout(rv, 10)})
           pr = self.getBackend(c, host)
           if (pr) break
