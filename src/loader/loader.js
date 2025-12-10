@@ -56,7 +56,7 @@ class TopbitLoader {
       multi: false,
       optionsRoute: true,
       fileAsGroup: true,
-      
+
       beforeController: null,
       afterController: null,
 
@@ -566,22 +566,22 @@ class TopbitLoader {
     let opts = { group };
     f = `${this.config.prePath}${f}`;
 
-    if (!this.fileAsGroup && m.path === undefined) {
-      m.path = [
+    if (!this.config.fileAsGroup && m.handler === undefined) {
+      m.handler = [
         'get', 'list', 'post', 'put', 'delete',
         'options', 'patch', 'head', 'trace'
       ];
     }
 
-    if (m.path && typeof m.path === 'string') m.path = [ m.path ];
+    if (m.handler && typeof m.handler === 'string') m.handler = [ m.handler ];
 
-    if (m.path && Array.isArray(m.path)) {
+    if (m.handler && Array.isArray(m.handler)) {
       opts.name = [];
-      let path_num;
-      for (let p of m.path) {
-        path_num = this.methodNumber[p.toLowerCase()];
-        if (path_num === undefined) continue;
-        opts.name.push(`${f}/${path_num}`);
+      let handler_num;
+      for (let p of m.handler) {
+        handler_num = this.methodNumber[p.toLowerCase()];
+        if (handler_num === undefined) continue;
+        opts.name.push(`${f}/${handler_num}`);
       }
     }
 
