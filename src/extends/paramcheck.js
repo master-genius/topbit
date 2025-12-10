@@ -13,7 +13,7 @@ class ParamCheck {
   constructor(options = {}) {
     this.type = ['query', 'param', 'body']
     this.key = 'param'
-    this.data = {}
+    this.rule = {}
     this.errorMessage = "提交数据不符合要求"
     //设置禁止提交的字段
     this.deny = null
@@ -28,9 +28,9 @@ class ParamCheck {
           }
           break
 
-        case 'data':
+        case 'rule':
           if (typeof options[k] === 'object') {
-            this.data = options[k]
+            this.rule = options[k]
           }
           break
 
@@ -57,25 +57,25 @@ class ParamCheck {
     }
 
     let data_type = ''
-    for (let k in this.data) {
-      data_type = typeof this.data[k]
+    for (let k in this.rule) {
+      data_type = typeof this.rule[k]
 
       if (data_type === 'string' || data_type === 'number') {
-        this.data[k] = {
+        this.rule[k] = {
           __is_value__: true,
-          __value__: this.data[k],
+          __value__: this.rule[k],
           __type__: data_type === 'string' ? TYPE_STRING : TYPE_NUMBER
         }
 
         continue
       }
 
-      this.data[k].__is_value__ = false
+      this.rule[k].__is_value__ = false
 
-      if (this.data[k].callback && typeof this.data[k].callback === 'function') {
-        this.data[k].__is_call__ = true
+      if (this.rule[k].callback && typeof this.rule[k].callback === 'function') {
+        this.rule[k].__is_call__ = true
       } else {
-        this.data[k].__is_call__ = false
+        this.rule[k].__is_call__ = false
       }
     }
 
@@ -194,8 +194,8 @@ class ParamCheck {
     let ost = {ok: true, key: ''}
 
     if (this.key !== 'body' || (c.body !== c.rawBody && typeof c.body === 'object')) {
-      for (let k in this.data) {
-        if (!this.checkData(d, k, this.data[k], c.method, ost)) {
+      for (let k in this.rule) {
+        if (!this.checkData(d, k, this.rule[k], c.method, ost)) {
           return ost
         }
       }
@@ -206,7 +206,7 @@ class ParamCheck {
 
   mid() {
     let self = this
-    let dataObject = this.data
+    let dataObject = this.rule
 
     if (!Array.isArray(this.deny) || this.deny.length === 0) this.deny = null
 
