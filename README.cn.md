@@ -1411,7 +1411,7 @@ https_server.listen(2026)
 
 ## 请求限流
 
-框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用topbit-toolkit扩展的http2limit模块。
+框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用扩展http2limit模块。
 
 ```javascript
 'use strict';
