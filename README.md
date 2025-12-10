@@ -1960,7 +1960,7 @@ const {ParamCheck} = Topbit.extensions
 // Query parameter check
 let pck = new ParamCheck({
   key: 'query',
-  data : {
+  rule: {
     // Strictly restrict value
     say: 'hello',
     // Type conversion and range restriction
@@ -1978,7 +1978,7 @@ let paramck = new ParamCheck({
   key: 'param',
   deny: ['x-key'], // Fields forbidden to submit
   deleteDeny: true,
-  data : {
+  rule: {
     errorMessage: 'Parameter Error', // Custom error message
     mobile: {
       callback: (obj, k, method) => {
@@ -1998,7 +1998,7 @@ app.use(pck, {method: 'GET'})
 ```javascript
 let pmbody = new ParamCheck({
   key: 'body',
-  data: {
+  rule: {
     username: { must: true },
     passwd: { must: true }
   }

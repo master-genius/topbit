@@ -2008,7 +2008,7 @@ const {ParamCheck} = Topbit.extensions
 // Query 参数检测
 let pck = new ParamCheck({
   key: 'query',
-  data : {
+  rule: {
     // 严格限制值
     say: 'hello',
     // 类型转换与范围限制
@@ -2026,7 +2026,7 @@ let paramck = new ParamCheck({
   key: 'param',
   deny: ['x-key'], // 禁止提交的字段
   deleteDeny: true,
-  data : {
+  rule: {
     errorMessage: '参数错误', // 自定义错误信息
     mobile: {
       callback: (obj, k, method) => {
@@ -2046,7 +2046,7 @@ app.use(pck, {method: 'GET'})
 ```javascript
 let pmbody = new ParamCheck({
   key: 'body',
-  data: {
+  rule: {
     username: { must: true },
     passwd: { must: true }
   }
