@@ -205,10 +205,13 @@ module.exports = [
 
 ```js
 // 在 controller/user.js 中
-static __mid() {
+// 只在本文件生效
+__mid() {
   return [
-    { name: '@vip-auth', pre: true },     // 只在本文件生效
-    { name: 'log', method: 'POST' }
+    { name: '@vip-auth', pre: true },
+    { name: 'log', method: 'POST' },
+    //只对控制器方法get list 启用中间件
+    { name: 'check', handler: ['get', 'list'] }
   ]
 }
 ```

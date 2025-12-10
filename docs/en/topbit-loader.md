@@ -206,10 +206,12 @@ module.exports = [
 
 ```js
 // Inside any controller file
-static __mid() {
+__mid() {
   return [
     { name: '@vip-auth', pre: true },
-    { name: 'log', method: 'POST' }
+    { name: 'log', method: 'POST' },
+    //use for controller method: get list
+    { name: 'check', handler: ['get', 'list'] }
   ]
 }
 ```
