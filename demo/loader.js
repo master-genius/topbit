@@ -27,3 +27,4 @@ app.autoWorker(12)
 app.daemon(1234, 5)
 
 //console.log(app.midware.midGroup)
+//console.log({...app.router})
