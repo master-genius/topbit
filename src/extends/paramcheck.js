@@ -30,7 +30,7 @@ class ParamCheck {
 
         case 'rule':
           if (typeof options[k] === 'object') {
-            this.rule = options[k]
+            this.rule = {...options[k]}
           }
           break
 
@@ -51,23 +51,40 @@ class ParamCheck {
           this.deleteDeny = !!options[k]
           break
 
-        default: 
+        default:
           this[k] = options[k]
       }
     }
 
+    this.ruleKeys = Object.keys(this.rule)
+
     let data_type = ''
-    for (let k in this.rule) {
+    for (let k of this.ruleKeys) {
       data_type = typeof this.rule[k]
 
       if (data_type === 'string' || data_type === 'number') {
         this.rule[k] = {
+          __is_regex__: false,
           __is_value__: true,
           __value__: this.rule[k],
           __type__: data_type === 'string' ? TYPE_STRING : TYPE_NUMBER
         }
 
         continue
+      }
+
+      if (this.rule[k] instanceof RegExp) {
+        this.rule[k] = {
+          __is_regex__: true,
+          __is_value__: false,
+          regex: this.rule[k]
+        }
+
+        continue
+      }
+
+      if (this.rule[k].regex && this.rule[k].regex instanceof RegExp) {
+        this.rule[k].__is_regex__ = true
       }
 
       this.rule[k].__is_value__ = false
@@ -82,11 +99,11 @@ class ParamCheck {
   }
 
   /**
-   * 
+   *
    * @param {object} obj c.param or c.query
    * @param {*} k key name
    * @param {*} rule filter rule
-   * 
+   *
    * rule描述了如何进行数据的过滤，如果rule是字符串或数字则要求严格相等。
    * 否则rule应该是一个object，可以包括的属性如下：
    *    - callback  用于过滤的回调函数，在验证时，会传递数据，除此之外没有其他参数。
@@ -108,7 +125,7 @@ class ParamCheck {
             ost.ok = false
             return false
           }
-          
+
           if (rule.default !== undefined) {
             obj[k] = rule.default
             return true
@@ -117,49 +134,80 @@ class ParamCheck {
         } else {
           //数据初始必然是字符串，转换只能是整数或浮点数或boolean。
           if (rule.to) {
-            if (isNaN(obj[k])) {
+            let is_number = typeof obj[k] === 'number'
+
+            if (is_number) {
+              if (rule.to === 'int') {
+                obj[k] = Math.floor(obj[k])
+              } else if (rule.to === 'boolean' || rule.to === 'bool') {
+                obj[k] = !!obj[k]
+              }
+            } else {
+              switch(rule.to) {
+                case 'int':
+                  obj[k] = parseInt(obj[k])
+                  if (isNaN(obj[k])) {
+                    if (rule.default !== undefined) {
+                      obj[k] = rule.default
+                      return true
+                    }
+                    ost.ok = false
+                    return false
+                  }
+                  break
+
+                case 'float':
+                  obj[k] = parseFloat(obj[k])
+                  if (isNaN(obj[k])) {
+                    if (rule.default !== undefined) {
+                      obj[k] = rule.default
+                      return true
+                    }
+                    ost.ok = false
+                    return false
+                  }
+                  break
+
+                case 'boolean':
+                case 'bool':
+                  obj[k] = (obj[k] === 'true' || obj[k] === true || obj[k] == 1) ? true : false
+                  break
+              }
+            }
+
+            if (rule.min !== undefined && obj[k] < rule.min) {
               ost.ok = false
               return false
             }
 
-            switch(rule.to) {
-              case 'int':
-                obj[k] = parseInt(obj[k])
-                if (isNaN(obj[k])) {
-                  if (rule.default !== undefined) {
-                    obj[k] = rule.default
-                    return true
-                  }
-                  ost.ok = false
-                  return false
-                }
-                break
+            if (rule.max !== undefined && obj[k] > rule.max) {
+              ost.ok = false
+              return false
+            }
+          } else if (typeof obj[k] === 'string') {
+            //data is string min and max mean's length
+            if (rule.min !== undefined && obj[k].length < rule.min) {
+              ost.ok = false
+              return false
+            }
 
-              case 'float':
-                obj[k] = parseFloat(obj[k])
-                if (isNaN(obj[k])) {
-                  if (rule.default !== undefined) {
-                    obj[k] = rule.default
-                    return true
-                  }
-                  ost.ok = false
-                  return false
-                }
-                break
-              
-              case 'boolean':
-              case 'bool':
-                obj[k] = obj[k] === 'true' ? true : false
-                break
+            if (rule.max !== undefined && obj[k].length > rule.max) {
+              ost.ok = false
+              return false
+            }
+          } else if (typeof obj[k] === 'number') {
+            if (rule.min !== undefined && obj[k] < rule.min) {
+                ost.ok = false
+                return false
+            }
+
+            if (rule.max !== undefined && obj[k] > rule.max) {
+                ost.ok = false
+                return false
             }
           }
 
-          if (rule.min !== undefined && obj[k] < rule.min) {
-            ost.ok = false
-            return false
-          }
-
-          if (rule.max !== undefined && obj[k] > rule.max) {
+          if (rule.__is_regex__ && !rule.regex.test(obj[k])) {
             ost.ok = false
             return false
           }
@@ -170,10 +218,11 @@ class ParamCheck {
           if (rule.callback(obj, k, method) !== false) {
             return true
           }
+
           ost.ok = false
           return false
         }
-      
+
     } else if (rule.__type__ === TYPE_STRING) {
       if (obj[k] === undefined || obj[k] !== rule.__value__) {
         ost.ok = false
@@ -194,7 +243,7 @@ class ParamCheck {
     let ost = {ok: true, key: ''}
 
     if (this.key !== 'body' || (c.body !== c.rawBody && typeof c.body === 'object')) {
-      for (let k in this.rule) {
+      for (let k of this.ruleKeys) {
         if (!this.checkData(d, k, this.rule[k], c.method, ost)) {
           return ost
         }
@@ -248,7 +297,7 @@ class ParamCheck {
 
         await next(c)
       }
-      
+
     }
 
     return async (c, next) => {
