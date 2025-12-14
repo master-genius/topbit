@@ -59,9 +59,8 @@ class User {
       role  : 'admin',
       // expires 可单独设置更长时间
     }
-    let t = token.make(userinfo)      // 签发 Token
-    c.setHeader('authorization', t)
-    c.to({ok: true, msg: 'login success'})
+    let t = token.makeToken(userinfo)      // 签发 Token
+    c.to({ok: true, msg: 'login success', token: t})
   }
 }
 

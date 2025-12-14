@@ -52,9 +52,8 @@ module.exports = token
 async post(c) {
   // After successful login
   const userinfo = { uid: 1, name: 'Alice', role: 'admin' }
-  const t = token.make(userinfo)
-  c.setHeader('authorization', t)
-  c.to({ok: true})
+  const t = token.makeToken(userinfo)
+  c.to({ok: true, token: t})
 }
 
 // All protected routes automatically use token.mid()
