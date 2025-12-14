@@ -2047,8 +2047,21 @@ app.use(pck, {method: 'GET'})
 let pmbody = new ParamCheck({
   key: 'body',
   rule: {
-    username: { must: true },
-    passwd: { must: true }
+    username: {
+      must: true,
+      //min length
+      min: 5,
+      //max length
+      max: 30
+    },
+    passwd: {
+      must: true,
+      min: 7,
+      max: 20
+    },
+    mobile: {
+      regex: /^(12|13|15|16|17|18|19)[0-9]{9}$/
+    }
   }
 })
 
@@ -2065,7 +2078,7 @@ JWT 协议的 Token 验证与签发。推荐使用 `Topbit.Token` 替代。
 const Topbit = require('topbit')
 const {JWT} = Topbit.extensions
 
-let j = new JWT({
+let j = new KWT({
   timeout: 7200000, // 超时时间
 })
 j.alg = 'hs512' // 设置算法

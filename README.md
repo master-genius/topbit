@@ -1999,8 +1999,21 @@ app.use(pck, {method: 'GET'})
 let pmbody = new ParamCheck({
   key: 'body',
   rule: {
-    username: { must: true },
-    passwd: { must: true }
+    username: {
+      must: true,
+      //min length
+      min: 5,
+      //max length
+      max: 30
+    },
+    passwd: {
+      must: true,
+      min: 7,
+      max: 20
+    },
+    mobile: {
+      regex: /^(12|13|15|16|17|18|19)[0-9]{9}$/
+    }
   }
 })
 
