@@ -93,6 +93,23 @@ let pmbody = new ParamCheck({
     },
     passwd: {
       must: true
+    },
+
+    mobile: {
+      errorMessage: '手机号不符合要求',
+      regex: /^(12|13|14|15|16|17|18|19)[0-9]{9}$/,
+    },
+
+    detail: {
+      errorMessage: 'detail长度0～10',
+      min: 0,
+      max: 10
+    },
+
+    age: {
+      to: 'int',
+      min: 15,
+      max: 95
     }
   }
 })
