@@ -59,8 +59,11 @@ if (app.isWorker) {
   new Loader().init(app)
 }
 
-app.autoWorker(16)      // 最大弹性进程数
-app.daemon(443, 4)      // 4 个基础进程
+// 最大弹性进程数
+app.autoWorker(16)
+  //延迟100ms后输出服务运行信息
+  .printServInfo(100)
+  .daemon(443, 4)      // 4 个基础进程
 ```
 
 只需执行 `node app.js` 即可启动完整服务！

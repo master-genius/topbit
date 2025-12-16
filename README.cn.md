@@ -62,7 +62,8 @@ const app = new Topbit({
   debug: true
 })
 
-app.run(1234)
+//输出服务信息并运行服务
+app.printServInfo().run(1234)
 
 ```
 
@@ -112,7 +113,7 @@ app.get('/', async ctx => {
     ctx.to('success')
 })
 
-app.run(1234)
+app.printServInfo().run(1234)
 
 ```
 
@@ -159,7 +160,7 @@ app.put('/p', async c => {
 })
 
 //默认监听0.0.0.0，参数和原生接口listen一致。
-app.run(8080)
+app.printServInfo().run(8080)
 
 ```
 

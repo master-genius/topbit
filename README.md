@@ -46,7 +46,8 @@ const app = new Topbit({
   debug: true
 })
 
-app.run(1234)
+//in debug mode, output service info
+app.printServInfo().run(1234)
 ```
 
 When no routes are added, Topbit adds a default route:
@@ -72,7 +73,7 @@ app.get('/', async ctx => {
 })
 
 // Defaults to listening on 0.0.0.0, parameters are consistent with the native listen interface.
-app.run(1234)
+app.printServInfo().run(1234)
 
 ```
 
@@ -94,7 +95,7 @@ app.get('/', async ctx => {
     ctx.to('success')
 })
 
-app.run(1234)
+app.printServInfo().run(1234)
 
 ```
 
@@ -141,7 +142,7 @@ app.put('/p', async c => {
 })
 
 // Defaults to listening on 0.0.0.0
-app.run(8080)
+app.printServInfo().run(8080)
 
 ```
 

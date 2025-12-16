@@ -61,8 +61,11 @@ if (app.isWorker) {
   new Loader().init(app)
 }
 
-app.autoWorker(16)   // Max elastic workers
-app.daemon(443, 4)   // 4 base workers
+// Max elastic workers
+app.autoWorker(16)
+  //delay 100ms, output service info
+  .printServInfo(100)
+  .daemon(443, 4)   // 4 base workers
 ```
 
 Run `node app.js` → full-featured service is up!
