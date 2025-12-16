@@ -6,7 +6,7 @@ const process = require('node:process');
 const checkHeaderLimit = require('./headerLimit.js')
 const sendmsg = require('./sendmsg.js');
 
-let Httpc = function () {
+function Httpc() {
   if ( !(this instanceof Httpc) ) {
     return new Httpc()
   }
