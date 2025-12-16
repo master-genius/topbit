@@ -21,10 +21,9 @@ if (app.isWorker) {
 }
 
 app.sched('none')
-
-app.autoWorker(12)
-
-app.daemon(1234, 5)
+  .autoWorker(12)
+  .printServInfo(100)
+  .daemon(1234, 5)
 
 //console.log(app.midware.midGroup)
 //console.log({...app.router})

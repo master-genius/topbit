@@ -44,7 +44,6 @@ if (app.isWorker) {
 
 
 app.sched('none')
-
-app.autoWorker(3)
-
-app.daemon(1234, 1)
+  .autoWorker(3)
+  .printServInfo()
+  .daemon(1234, 2)
