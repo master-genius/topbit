@@ -39,7 +39,7 @@ const ErrorLog = require('./lib/errorlog.js')
 let __instance__ = 0;
 
 let _topbit_server_running = `
-:.:.:.:.:.:.topbit in service.:.:.:.:.:.:
+:.:.:.:.:\x1b[34;5m.\x1b[0m:\x1b[36;5m.\x1b[0m topbit in service \x1b[36;5m.\x1b[0m:\x1b[34;5m.\x1b[0m:.:.:.:.:
 `;
 
 let _topbit_home_page = `<!DOCTYPE html><html>
@@ -916,38 +916,69 @@ class Topbit {
   
       });
     }
-    
-    /**
-     * 输出路由表，如果是启用了cluster，则通过发送消息的方式让master进程输出。
-     * */
-    if (this.config.debug) {
-      if (typeof port === 'string' && port.indexOf('.sock') > 0) {
-        host = '';
-      }
-  
-      let is_https = this.config.https;
-  
-      let protocol = this.config.http2
-                      ? ('http2' + (is_https ? '[https]' : ''))
-                      : (is_https ? 'https' : 'http');
-  
-      if (cluster.isMaster) { 
-        this.router.printTable();
-        console.log(`PID: ${process.pid}, Listen ${host}:${port}, Protocol: ${protocol}`);
-        console.log(_topbit_server_running);
-      } else if (process.send && typeof process.send === 'function') {
-        process.send({type:'_route-table', 
-          route: this.router.getTable(),
-          listen: `Listen: ${host}${host.length > 0 ? ':' : ''}${port}, `,
-          protocol: `Protocol: ${protocol}`
-        });
-      }
-    }
-  
+
     this.server = this.httpServ.run(port, host);
     return this.server;
   }
   //run end
+
+  /**
+   * 
+   * @param {number} timeout - default 0
+   * @param {boolean} debug - default true(true表示只有debug模式才会输出)
+   * @returns 
+   */
+  printServInfo(timeout=0, debug=true) {
+    if (typeof timeout === 'boolean') {
+      debug = timeout
+      timeout = 0
+    }
+
+    if (!debug || (debug && this.config.debug)) {
+      if (timeout > 0) {
+        setTimeout(() => {
+          this._corePrintServ()
+        }, timeout)
+      } else {
+        queueMicrotask(() => {
+          this._corePrintServ()
+        })
+      }
+    }
+
+    return this
+  }
+
+  _corePrintServ() {
+    let {port, host} = this.rundata
+  
+    /**
+    * 输出路由表，如果是启用了cluster，则通过发送消息的方式让master进程输出。
+    * */
+    if (typeof port === 'string' && port.indexOf('.sock') > 0) {
+      host = '';
+    }
+
+    let is_https = this.config.https;
+
+    let protocol = this.config.http2
+                    ? ('http2' + (is_https ? '[https]' : ''))
+                    : (is_https ? 'https' : 'http');
+
+    if (cluster.isMaster) { 
+      this.router.printTable();
+      console.log(`PID: ${process.pid}, Listen ${host}:${port}, Protocol: ${protocol}`);
+      console.log(_topbit_server_running);
+    } else if (process.send && typeof process.send === 'function') {
+      process.send({type:'_route-table', 
+        route: this.router.getTable(),
+        listen: `Listen: ${host}${host.length > 0 ? ':' : ''}${port}, `,
+        protocol: `Protocol: ${protocol}`
+      });
+    }
+
+    return this
+  }
 
   /**
    * @param {string} evt
@@ -968,8 +999,9 @@ class Topbit {
       count: 0,
       mode: mode,
       callback: callback
-    };
-    return true;
+    }
+
+    return this;
   }
 
   getMsgEvent(evt) {
@@ -1047,11 +1079,13 @@ class Topbit {
   }
 
   autoWorker(max) {
-    if (typeof max === 'number' && max > 0) {
-      this.workerCount.max = max;
+    if (!isNaN(max) && typeof max === 'number' && max >= 0) {
+      this.workerCount.max = max > 0 ? max : os.cpus().length;
     } else {
-      throw new Error('autoWorker参数必须是一个大于0的数字，表示最大允许创建多少个子进程处理请求。');
+      throw new Error('autoWorker参数必须是一个>=0的数字，表示最大允许创建多少个子进程处理请求。');
     }
+
+    return this;
   }
 
   /**
@@ -1066,6 +1100,8 @@ class Topbit {
     } else {
       return cluster.schedulingPolicy;
     }
+
+    return this;
   }
 
   _checkDaemonArgs() {
