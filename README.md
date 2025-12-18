@@ -936,9 +936,9 @@ Full configuration options for app initialization are as follows. Please read th
       this.config.debug && console.error(errname, err)
     },
 
-    // Max load rate percentage. Default 75 means if CPU usage > 75%, automatically create child process.
+    // Max load rate percentage. Default 0.75 means if CPU usage > 75%, automatically create child process.
     // Must enable auto load mode via autoWorker.
-    maxLoadRate: 75,
+    maxLoadRate: 0.75,
 
     // http2 protocol http2Stream timeout. If not set, -1 means consistent with timeout.
     streamTimeout: -1,

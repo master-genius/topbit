@@ -972,9 +972,9 @@ app.run(1234)
       this.config.debug && console.error(errname, err)
     },
 
-    //最大负载率百分比，默认为75表示当CPU使用率超过75%，则会自动创建子进程。
+    //最大负载率百分比，默认为0.75表示当CPU使用率超过75%，则会自动创建子进程。
     //必须通过autoWorker开启自动负载模式才有效。
-    maxLoadRate: 75,
+    maxLoadRate: 0.75,
 
     //http2协议的http2Stream超时，若不设置，-1表示和timeout一致。
     streamTimeout: -1,
