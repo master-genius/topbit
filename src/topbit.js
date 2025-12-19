@@ -1154,7 +1154,7 @@ class Topbit {
 
   }
 
-  /** 
+  /**
    * 根据配置情况确定运行HTTP/1.1还是HTTP/2
    * @param {number} port 端口号
    * @param {string} host IP地址，可以是IPv4或IPv6
