@@ -17,8 +17,8 @@ class TopbitLoader {
     let appDir = '.';
     
     this.globalMidTable = [];
-    this.groupMidTable = {};
-    this.fileMidTable = {};
+    this.groupMidTable = Object.create(null);
+    this.fileMidTable = Object.create(null);
 
     if (typeof options !== 'object') {
       options = {};
@@ -159,10 +159,7 @@ class TopbitLoader {
     }
   }
 
-  /**
-   * 初始化入口 (Async)
-   */
-  async init(app) {
+  async _coreinit(app) {
     // 注入应用基础信息到 service，供 Controller 或 Model 使用
     Object.defineProperties(app.service, {
       __prepath__: {
@@ -187,6 +184,26 @@ class TopbitLoader {
     this.loadMidware(app);
     
     app.service.__topbit_loader__ = true;
+  }
+
+  /**
+   * 初始化入口 (Async)，提供回调函数在完成后执行
+   */
+  async init(app, cb) {
+    await this._coreinit(app);
+    if (cb && typeof cb === 'function') {
+      cb(app);
+    }
+  }
+
+  async daemonInit(app, cb) {
+    if (app.isWorker) {
+      await this._coreinit(app);
+    }
+
+    if (cb && typeof cb === 'function') {
+      cb(app);
+    }
   }
 
   loadController(app) {
