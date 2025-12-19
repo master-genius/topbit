@@ -9,8 +9,8 @@ let {args} = npargv({
     default: 'text',
     limit: ['text', 'json', 'orgjson', 'obj', 'orgobj']
   },
-  '--loadstdio': {
-    name: 'loadstdio',
+  '--load': {
+    name: 'load',
     default: false
   },
 
@@ -32,7 +32,7 @@ const app = new Topbit({
     loadInfoType : args.loadtype,
     globalLog : false,
     logType: 'stdio',
-    loadInfoFile : args.loadstdio ? '' : '/tmp/topbit-loadinfo.log',
+    loadInfoFile : args.load ? '' : '/tmp/topbit-loadinfo.log',
     maxLoadRate: 0.56
 });
 
@@ -75,7 +75,6 @@ app.use(async (c, next) => {
 
 }, {pre: true, method: 'POST', name: 'transmit'});
 
-
 app.autoWorker(4)
 
-app.daemon(2034, 1)
+app.printServInfo().daemon(2034, 1)
