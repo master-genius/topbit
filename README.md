@@ -812,8 +812,6 @@ Full configuration options for app initialization are as follows. Please read th
     // Max number of files to parse
     maxFiles      : 12,
 
-    daemon        : false, // Enable daemon mode
-
     /*
       After enabling daemon mode, if path is not empty string, pid is written to this file. Used for service management.
     */

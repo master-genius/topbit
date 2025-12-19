@@ -101,7 +101,9 @@ new Loader({
     const UserModel = require('./model/user')
     service.userModel = new UserModel(service)
   }
-}).init(app)
+}).init(app, () => {
+  app.run(1234)
+})
 ```
 
 ---
@@ -236,7 +238,9 @@ new Loader({
       service[name + 'Model'] = new Model(service)
     }
   }
-}).init(app)
+}).daemonInit(app, () => {
+  app.daemon(1234, 2)
+})
 ```
 
 ---
