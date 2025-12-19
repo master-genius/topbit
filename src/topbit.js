@@ -140,7 +140,6 @@ class Topbit {
    * - globalLog {bool} 启用全局日志。
    * - maxBody {number} 表示POST/PUT提交表单的最大字节数，包括上传文件。
    * - maxFiles {number} 最大上传文件数量，超过则不处理。
-   * - daemon {bool} 启用守护进程模式。
    * - pidFile {string} 保存Master进程PID的文件路径。
    * - logFile {string} 日志文件。
    * - errorLogFile {string} 错误日志文件。
@@ -172,6 +171,9 @@ class Topbit {
       throw new Error('topbit遵循单例模式，不能构造多次。你可以在多进程或多线程中构造新的实例。');
 
     __instance__ += 1;
+
+    this._is_listening = false;
+    this._is_daemon_listening = false;
   
     this.config = {
       //此配置表示POST/PUT提交表单的最大字节数，也是上传文件的最大限制，
@@ -856,71 +858,6 @@ class Topbit {
   clearService() {
     for (let k in this.service) delete this.service[k];
   }
-  
-  /** 
-   * 根据配置情况确定运行HTTP/1.1还是HTTP/2
-   * @param {number} port 端口号
-   * @param {string} host IP地址，可以是IPv4或IPv6
-   * 0.0.0.0 对应使用IPv6则是::
-  */
-  run(port=2368, host='0.0.0.0') {
-    if (typeof port === 'object') {
-      if (port.host && typeof port.host === 'string') host = port.host;
-      if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
-    }
-
-    if (this.config.server.SNICallback && typeof this.config.server.SNICallback === 'function' && !this.config.https) {
-      this.config.https = true;
-    }
-  
-    this.router.argsRouteSort();
-  
-    this.rundata.host = (typeof port == 'number' ? host : '');
-    this.rundata.port = port;
-  
-    //如果没有添加路由则添加默认路由
-    if (this.router.count === 0) {
-      this.router.get('/*', async c => {
-        c.setHeader('content-type', 'text/html; charset=utf-8').to(_topbit_home_page)
-      })
-    }
-  
-    //如果发现更改了service指向，则让this.httpServ.service重新指向this.service。
-    if (this.service !== this.httpServ.service) {
-      this.httpServ.service = this.service;
-    }
-  
-    this.midware.addFromCache();
-  
-    this.config.parseBody && this.add(this.bodyparser);
-  
-    this.add(this.httpServ);
-  
-    let m = null;
-    while((m = this.__pre_mids__.pop()) !== undefined) {
-      this.add(m.callback, m.options);
-    }
-    
-    //必须放在最后，用于返回最终数据。
-    this.midware.addFinal();
-  
-    if (this.config.useLimit) {
-      let connlimit = new this.connfilter(this.limit, this.rundata);
-      this.on('connection', connlimit.callback);
-    } else {
-      this.on('connection', (sock) => {
-        this.rundata.conn++;
-        sock.on('close', () => {
-          this.rundata.conn--;
-        });
-  
-      });
-    }
-
-    this.server = this.httpServ.run(port, host);
-    return this.server;
-  }
-  //run end
 
   /**
    * 
@@ -1148,7 +1085,6 @@ class Topbit {
         cpu: {user:0, system:0},
         cputm : 1000000
       };
-      
     });
 
     let exitTip = () => {
@@ -1218,6 +1154,76 @@ class Topbit {
 
   }
 
+  /** 
+   * 根据配置情况确定运行HTTP/1.1还是HTTP/2
+   * @param {number} port 端口号
+   * @param {string} host IP地址，可以是IPv4或IPv6
+   * 0.0.0.0 对应使用IPv6则是::
+  */
+  run(port=2368, host='0.0.0.0') {
+    if (this._is_listening) return this.server;
+
+    if (typeof port === 'object') {
+      if (port.host && typeof port.host === 'string') host = port.host;
+      if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
+    }
+
+    if (this.config.server.SNICallback && typeof this.config.server.SNICallback === 'function' && !this.config.https) {
+      this.config.https = true;
+    }
+
+    this._is_listening = true;
+  
+    this.router.argsRouteSort();
+  
+    this.rundata.host = (typeof port == 'number' ? host : '');
+    this.rundata.port = port;
+  
+    //如果没有添加路由则添加默认路由
+    if (this.router.count === 0) {
+      this.router.get('/*', async c => {
+        c.setHeader('content-type', 'text/html; charset=utf-8').to(_topbit_home_page)
+      })
+    }
+  
+    //如果发现更改了service指向，则让this.httpServ.service重新指向this.service。
+    if (this.service !== this.httpServ.service) {
+      this.httpServ.service = this.service;
+    }
+  
+    //必须要坚持先加载再listen的原则。
+    this.midware.addFromCache();
+  
+    this.config.parseBody && this.add(this.bodyparser);
+  
+    this.add(this.httpServ);
+  
+    let m = null;
+    while((m = this.__pre_mids__.pop()) !== undefined) {
+      this.add(m.callback, m.options);
+    }
+    
+    //必须放在最后，用于返回最终数据。
+    this.midware.addFinal();
+  
+    if (this.config.useLimit) {
+      let connlimit = new this.connfilter(this.limit, this.rundata);
+      this.on('connection', connlimit.callback);
+    } else {
+      this.on('connection', (sock) => {
+        this.rundata.conn++;
+        sock.on('close', () => {
+          this.rundata.conn--;
+        });
+  
+      });
+    }
+
+    this.server = this.httpServ.run(port, host);
+    return this.server;
+  }
+  //run end
+
   /**
    * 这个函数是可以用于运维部署，此函数默认会根据CPU核数创建对应的子进程处理请求。
    * @param {number} port 端口号
@@ -1225,6 +1231,8 @@ class Topbit {
    * @param {number} num，要创建的子进程数量，0表示自动，这时候根据CPU核心数量创建。
   */
   daemon(port=2368, host='0.0.0.0', num=0) {
+    if (this._is_daemon_listening) return this;
+
     if (typeof host === 'number') {
       num = host;
       host = '0.0.0.0';
@@ -1236,14 +1244,16 @@ class Topbit {
       if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
     }
 
+    this._is_daemon_listening = true;
     //确保自动创建的worker在终止时不会误认为是系统错误。
     setTimeout(() => {
       this.errorBreakCount += 1;
     }, this.workerErrorTime + 120);
 
-    this._checkDaemonArgs();
+    //暂时去掉，并且屏蔽daemon选项。
+    //this._checkDaemonArgs();
     
-    if (cluster.isMaster) {
+    if (cluster.isPrimary || cluster.isMaster) {
       let osCPUS = os.cpus().length;
       if (num > (osCPUS * 2) ) {
         num = 0;
