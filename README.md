@@ -897,9 +897,6 @@ Full configuration options for app initialization are as follows. Please read th
     // Max URL length
     maxUrlLength: 2048,
 
-    // Max number of request context cache pool.
-    maxpool: 4096,
-
     // Timer milliseconds for child process resource reporting.
     monitorTimeSlice: 640,
 

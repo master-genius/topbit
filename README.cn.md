@@ -933,9 +933,6 @@ app.run(1234)
     //url最大长度
     maxUrlLength: 2048,
 
-    //请求上下文缓存池最大数量。
-    maxpool: 4096,
-
     //子进程汇报资源信息的定时器毫秒数。
     monitorTimeSlice: 640,
 
