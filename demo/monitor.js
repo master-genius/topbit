@@ -33,7 +33,7 @@ const app = new Topbit({
     globalLog : false,
     logType: 'stdio',
     loadInfoFile : args.load ? '' : '/tmp/topbit-loadinfo.log',
-    maxLoadRate: 0.56
+    maxLoadRate: 0.6
 });
 
 app.get('/', async c => {
@@ -46,7 +46,7 @@ app.get('/test', async c => {
     for (let i = 0; i < 90000; i++) {
         sum += Math.random() * i;
     }
-    c.to({sum});
+    c.setHeader(`x-test-${Math.floor(Math.random() * 100)}`, sum).to({sum});
 }, {group: 'test', name : 'test'});
 
 app.post('/test', async c => {
