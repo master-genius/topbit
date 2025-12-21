@@ -15,30 +15,13 @@ class Middleware extends MidCore {
     try {
       await this.exec(ctx, ctx.group);
     } catch (err) {
-      
       this.errorHandle(err, '--ERR-res--');
-
       try {
         if (ctx.res && !ctx.res.writableEnded) {
           ctx.res.statusCode = 500;
           ctx.res.end();
         }
       } catch (err) {}
-
-    } finally {
-      ctx.req = null;
-      ctx.res = null;
-      ctx.data = null;
-      ctx.box = null;
-      ctx.service = null;
-      ctx.requestCall = null;
-      ctx.headers = null;
-      ctx.body = null;
-      ctx.rawBody = null;
-      ctx.files = null;
-      ctx.param = null;
-      ctx.user = null;
-      ctx = null;
     }
   }
 

@@ -155,7 +155,6 @@ class Topbit {
    * - memFactor {number} 控制内存最大使用量的系数，范围从 -0.45 ～ 0.45，会使用基本系数加上此值并乘以内存总量。默认值0.28。
    *      RSS基本系数是0.52。不要设置的太低，提供比较低的值是为了测试使用。
    * - maxUrlLength 最大URL长度，包括path和querystring
-   * - maxpool 请求上下文的最大缓存池数量。
    * - loadMonitor true|false，表示是否启用负载监控功能，在daemon模式有效，默认为true。
    * - monitorTimeSlice 子进程获取系统占用资源的定时器时间片，毫秒值，默认为500。
    * - maxQuery 最大允许的querystring的参数，默认为12。
@@ -239,8 +238,6 @@ class Topbit {
       autoDecodeQuery : true,
   
       maxUrlLength: 1152,
-  
-      maxpool : 8192,
   
       //子进程汇报资源信息的定时器毫秒数。
       monitorTimeSlice: 500,
@@ -338,10 +335,6 @@ class Topbit {
   
         case 'maxUrlLength':
           optionsCheck(k, options[k], this.config, {type: 'number', min: 1, max: 4096});
-          break;
-        
-        case 'maxpool':
-          optionsCheck(k, options[k], this.config, {type: 'number', min: 2, max: 50000});
           break;
   
         case 'monitorTimeSlice':

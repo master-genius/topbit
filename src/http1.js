@@ -7,7 +7,6 @@ const process = require('node:process');
 const logger = require('./logger.js');
 const {fpurl} = require('./fastParseUrl.js');
 const Context = require('./context1.js');
-const ctxpool = require('./ctxpool.js');
 const checkHeaderLimit = require('./headerLimit.js');
 const sendmsg = require('./sendmsg.js');
 
@@ -25,9 +24,6 @@ class Http1 {
     this.isWorker = options.isWorker;
 
     this.logger = logger;
-    ctxpool.max = this.config.maxpool;
-
-    this.ctxpool = ctxpool;
     this.Context = Context;
     this.fpurl = fpurl;
     this.host = '';
@@ -109,7 +105,7 @@ class Http1 {
         return ;
       }
 
-      let ctx = ctxpool.getctx () || new Context();
+      let ctx = new Context();
 
       ctx.bodyLength = 0;
       ctx.maxBody = self.config.maxBody;
@@ -134,10 +130,7 @@ class Http1 {
       ctx.param = rt.args;
       rt = null;
 
-      return self.midware.run(ctx).finally(()=>{
-        ctxpool.free(ctx);
-        ctx = null;
-      });
+      return self.midware.run(ctx);
     };
 
     return callback;

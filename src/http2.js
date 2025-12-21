@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const process = require('node:process');
 const logger = require('./logger.js');
 const {fpurl} = require('./fastParseUrl.js');
-const ctxpool = require('./ctxpool.js');
 const Context = require('./context2.js');
 const checkHeaderLimit = require('./headerLimit.js');
 const sendmsg = require('./sendmsg.js');
@@ -25,9 +24,6 @@ class Httpt {
     this.isWorker = options.isWorker;
 
     this.logger = logger;
-    ctxpool.max = this.config.maxpool;
-
-    this.ctxpool = ctxpool;
     this.Context = Context;
     this.fpurl = fpurl;
 
@@ -114,7 +110,7 @@ class Httpt {
         stream.close();
       });
     
-      let ctx = ctxpool.getctx() || new Context();
+      let ctx = new Context();
 
       ctx.bodyLength = 0;
       ctx.maxBody = self.config.maxBody;
@@ -128,10 +124,7 @@ class Httpt {
       ctx.stream = stream;
       ctx.res = ctx.stream;
       ctx.req = ctx.stream;
-     
-      ctx.dataHeaders = {};
       ctx.headers = headers;
-
       ctx.path = urlobj.path;
       ctx.query = urlobj.query;
       ctx.routepath = rt.key;
@@ -141,10 +134,7 @@ class Httpt {
       ctx.param = rt.args;
       rt = null;
 
-      return self.midware.run(ctx).finally(() => {
-        ctxpool.free(ctx);
-        ctx = null;
-      });
+      return self.midware.run(ctx);
     };
     
     return callback;

@@ -16,9 +16,7 @@ class Middleware extends MidCore {
     try {
       await this.exec(ctx, ctx.group);
     } catch (err) {
-      
       this.errorHandle(err, '--ERR-RESPONSE--');
-
       if (ctx.stream && !ctx.stream.destroyed && ctx.stream.writable) {
         try {
           if (!ctx.stream.headersSent) {
@@ -30,24 +28,7 @@ class Middleware extends MidCore {
           ctx.stream.end();
         } catch (err) {}
       }
-    } finally {
-      ctx.data = null;
-      ctx.dataHeaders = null;
-      ctx.stream = null;
-      ctx.req = null;
-      ctx.res = null;
-      ctx.service = null;
-      ctx.box = null;
-      ctx.requestCall = null;
-      ctx.body = null;
-      ctx.headers = null;
-      ctx.rawBody = null;
-      ctx.files = null;
-      ctx.param = null;
-      ctx.user = null;
-      ctx = null;
     }
-
   }
 
   /** 这是最终添加的请求中间件。基于洋葱模型，这个中间件最先执行，所以最后会返回响应结果。 */
