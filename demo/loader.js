@@ -31,7 +31,7 @@ let app = new Topbit({
   globalLog : false,
   logType: 'stdio',
   loadInfoFile : args.load ? '' : '/tmp/topbit-loadinfo.log',
-  maxLoadRate: 0.6
+  maxLoadRate: 0.85
 })
 
 if (app.isWorker) {
