@@ -19,7 +19,15 @@ let app = new Topbit({
   loadInfoFile: '--mem',
   cert: './cert/localhost-cert.pem',
   key: './cert/localhost-privkey.pem',
-  http2: true
+  http2: true,
+  server: {
+    peerMaxConcurrentStreams: 200,
+    settings: {
+      maxConcurrentStreams: 201,
+      maxHeaderListSize: 16384,
+      maxHeaderSize: 16384
+    }
+  }
 })
 
 if (app.isWorker) {
@@ -42,8 +50,32 @@ if (app.isWorker) {
   })
 }
 
+app.on('connection', sock => {
+  console.log(sock)
+})
 
 app.sched('none')
   .autoWorker(3)
   .printServInfo()
   .daemon(1234, 2)
+
+let settings = {
+  maxConcurrentStreams: 200,
+  maxHeaderListSize: 16384
+}
+
+app.on('session', sess => {
+  console.log(sess.localSettings, sess.remoteSettings)
+
+  sess.on('localSettings', s => {
+    console.log('local', s)
+  })
+
+  sess.on('remoteSettings', s => {
+    console.log('remote', s)
+  })
+  /* sess.settings(settings, (err, setting, dura) => {
+    console.log(setting, dura)
+  }) */
+  
+})
