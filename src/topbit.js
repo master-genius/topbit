@@ -780,14 +780,20 @@ class Topbit {
       if (typeof callback === 'function') {
         this.httpServ.requestError = callback;
       }
-      return;
+      return this;
     }
-    
+
+    if (this.server && this.server.on) {
+      this.server.on(evt, callback);
+      return this;
+    }
+
     if (!this.eventTable[evt]) {
       this.eventTable[evt] = [ callback ];
     } else {
       this.eventTable[evt].push(callback);
     }
+    return this;
   }
   
   /**
