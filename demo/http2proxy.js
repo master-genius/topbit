@@ -14,7 +14,7 @@ let app = new Topbit({
 if (app.isWorker) {
   let h2proxy = new Http2Proxy({
     config: {
-      'x.com': [
+      'v.com': [
         {
           url: 'http://localhost:3001',
           weight: 10,
@@ -45,4 +45,4 @@ if (app.isWorker) {
   h2proxy.init(app)
 }
 
-app.daemon(1234, 2)
+app.printServInfo().daemon(1234, 2)

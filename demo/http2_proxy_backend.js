@@ -42,4 +42,4 @@ if (port_ind > 0 && port_ind < process.argv.length - 1) {
     port = 2022
 }
 
-app.run(port)
+app.printServInfo().run(port)
