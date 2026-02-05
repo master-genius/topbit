@@ -29,7 +29,7 @@ let error_503_text = `<!DOCTYPE html><html>
           <p>此服务暂时不可用。</p>
         </div>
       </body>
-  </html>` 
+  </html>`
 
 function fmtpath(path) {
   path = path.trim()
@@ -83,6 +83,8 @@ let Http2Proxy = function (options = {}) {
 
   this.maxBody = 50000000
 
+  this.realIPHeader = 'x-real-ip'
+
   //是否启用全代理模式。
   this.full = false
 
@@ -103,8 +105,18 @@ let Http2Proxy = function (options = {}) {
     family: 4
   }
 
+  this.balancer = (options.balancer
+                    && options.balancer.select
+                      && typeof options.balancer.select === 'function')
+                    ? options.balancer
+                    : null
+
   for (let k in options) {
     switch (k) {
+      case 'realIPHeader':
+        this.realIPHeader = options[k]
+        break
+
       case 'config':
         this.config = options[k]
         break
@@ -323,8 +335,11 @@ Http2Proxy.prototype.checkAlive = function (pr) {
 
 Http2Proxy.prototype.getBackend = function (c, host) {
   let prlist = this.hostProxy[host][c.routepath]
-
   let pxybalance = this.proxyBalance[host][c.routepath]
+
+  if (this.balancer) {
+    return this.balancer.select(c, prlist, pxybalance)
+  }
 
   let pr
 
@@ -399,7 +414,7 @@ Http2Proxy.prototype.mid = function () {
 
     if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
       if (self.full) {
-        return c.status(502).to(error_502_text) 
+        return c.status(502).to(error_502_text)
       }
 
       return await next(c)
@@ -408,10 +423,10 @@ Http2Proxy.prototype.mid = function () {
     let pr = self.getBackend(c, host)
     if (!pr) return c.status(503).to(error_503_text)
 
-    if (self.addIP && c.headers['x-real-ip']) {
-      c.headers['x-real-ip'] += `,${c.ip}`
+    if (self.addIP && c.headers[self.realIPHeader]) {
+      c.headers[self.realIPHeader] += `,${c.ip}`
     } else {
-      c.headers['x-real-ip'] = c.ip
+      c.headers[self.realIPHeader] = c.ip
     }
 
     let hii = pr.h2Pool

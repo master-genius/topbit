@@ -35,6 +35,7 @@ const TopbitExtends = require('./_loadExtends.js')
 const npargv = require('./lib/npargv.js')
 const zipdata = require('./lib/zipdata.js')
 const ErrorLog = require('./lib/errorlog.js')
+const Balancer = require('./lib/balancer.js')
 
 let __instance__ = 0;
 
@@ -1335,5 +1336,6 @@ Topbit.npargv = npargv;
 Topbit.zipdata = zipdata;
 Topbit.ErrorLog = ErrorLog;
 Topbit.extensions = TopbitExtends;
+Topbit.ProxyBalancer = Balancer;
 
 module.exports = Topbit;

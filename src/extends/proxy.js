@@ -40,6 +40,8 @@ class Proxy {
 
     this.methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD', 'PATCH', 'TRACE']
 
+    this.realIPHeader = 'x-real-ip'
+
     this.hostProxy = {}
 
     this.proxyBalance = {}
@@ -104,8 +106,18 @@ class Proxy {
       options = {}
     }
 
+    this.balancer = (options.balancer
+                    && options.balancer.select
+                      && typeof options.balancer.select === 'function')
+                    ? options.balancer
+                    : null
+
     for (let k in options) {
       switch (k) {
+        case 'realIPHeader':
+          this.realIPHeader = options[k]
+          break
+
         case 'host':
         case 'config':
           this.config = options[k]
@@ -375,6 +387,10 @@ class Proxy {
   getBackend(c, host) {
     let prlist = this.hostProxy[host][c.routepath]
     let pb = this.proxyBalance[host][c.routepath]
+    if (this.balancer) {
+      return this.balancer.select(c, prlist, pxybalance)
+    }
+
     let pr
 
     if (prlist.length === 1) {
@@ -448,10 +464,10 @@ class Proxy {
       urlobj.headers = c.headers
       urlobj.method = c.method
 
-      if (self.addIP && urlobj.headers['x-real-ip']) {
-        urlobj.headers['x-real-ip'] += `,${c.ip}`
+      if (self.addIP && urlobj.headers[self.realIPHeader]) {
+        urlobj.headers[self.realIPHeader] += `,${c.ip}`
       } else {
-        urlobj.headers['x-real-ip'] = c.ip
+        urlobj.headers[self.realIPHeader] = c.ip
       }
 
       let hci = urlobj.protocol == 'https:' ? https : http
