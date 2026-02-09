@@ -264,7 +264,12 @@ class SSE {
 
   init(app) {
     let Context = app.httpServ.Context
-    Context.prototype.sendmsg = sendmsg
+    Object.defineProperty(Context.prototype, 'sendmsg', {
+      enumerable: false,
+      writable: true,
+      configurable: true,
+      value: sendmsg
+    })
   }
 
   mid() {
@@ -276,7 +281,12 @@ class SSE {
       //用于统计是否超时断开并发送retry
       ctx.box.sseCount = 0
       if (!ctx.sendmsg) {
-        ctx.__proto__.sendmsg = sendmsg
+        Object.defineProperty(ctx.__proto__, 'sendmsg', {
+          enumerable: false,
+          writable: true,
+          configurable: true,
+          value: sendmsg
+        })
       }
 
       ctx.res.setTimeout(self.timeout, () => {

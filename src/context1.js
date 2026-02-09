@@ -160,7 +160,20 @@ class Context {
 
 }
 
-Context.prototype.oo = Context.prototype.to
-Context.prototype.ok = Context.prototype.to
+Object.defineProperties(Context.prototype, {
+  oo: {
+    enumerable: false,
+    writable: true,
+    configurable: true,
+    value: Context.prototype.to
+  },
+
+  ok: {
+    enumerable: false,
+    writable: true,
+    configurable: true,
+    value: Context.prototype.to
+  }
+})
 
 module.exports = Context
