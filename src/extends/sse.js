@@ -76,6 +76,11 @@ function fmtMessage(msg, withEnd=true) {
   return text
 }
 
+function sendmsg(msg, cb=undefined) {
+  let emsg = fmtMessage(msg)
+  if (emsg) return this.res.write(emsg, cb)
+}
+
 class SSE {
 
   constructor(options = {}) {
@@ -257,6 +262,11 @@ class SSE {
     }
   }
 
+  init(app) {
+    let Context = app.httpServ.Context
+    Context.prototype.sendmsg = sendmsg
+  }
+
   mid() {
     let self = this
 
@@ -265,11 +275,8 @@ class SSE {
       ctx.sse = self
       //用于统计是否超时断开并发送retry
       ctx.box.sseCount = 0
-      if (!ctx.sendmsg || typeof ctx.sendmsg !== 'function') {
-        ctx.sendmsg = (msg, cb=undefined) => {
-          let emsg = fmtMessage(msg)
-          if (emsg) return ctx.res.write(emsg, cb)
-        }
+      if (!ctx.sendmsg) {
+        ctx.__proto__.sendmsg = sendmsg
       }
 
       ctx.res.setTimeout(self.timeout, () => {
