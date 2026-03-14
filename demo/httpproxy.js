@@ -1,19 +1,34 @@
 'use strict'
 
+process.chdir(__dirname)
+
 let Topbit = require('../src/topbit.js')
 
 let {Proxy} = Topbit.extensions
+
+const npargv = Topbit.npargv
+
+let {args} = npargv({
+  '--httpc': {
+    name: 'httpc',
+    default: false,
+  }
+})
 
 let app = new Topbit({
   debug: true,
   globalLog: true,
   loadInfoFile: '--mem',
+  http2: args.httpc,
+  allowHTTP1: args.httpc,
+  cert: args.httpc ? './cert/x.com.cert' : '',
+  key: args.httpc ? './cert/x.com.key' : '',
 })
 
 if (app.isWorker) {
   let pxy = new Proxy({
     config: {
-      'x.com': [
+      'w.com': [
         {
           url: 'http://localhost:3001',
           weight: 10,
@@ -44,4 +59,4 @@ if (app.isWorker) {
   pxy.init(app)
 }
 
-app.daemon(1234, 2)
+app.printServInfo().daemon(1234, 2)
