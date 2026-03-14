@@ -107,21 +107,14 @@ Httpc.prototype.onRequest = function () {
 
     if (rt === null) {
       res.statusCode = 404
-      res.end(self.config.notFound)
-      return
+      return res.end(self.config.notFound)
     }
 
-    let ctx = self.ctxpool.getctx() || new self.Context()
+    let ctx = new self.Context()
 
-    if (req.httpVersion[0] === '1') {
-      ctx.version = '1.1'
-      ctx.major = 1
-      ctx.host = req.headers.host || self.host
-    } else {
-      ctx.version = '2'
-      ctx.major = 2
-      ctx.host = req.authority
-    }
+    ctx.version = req.httpVersion
+    ctx.major = req.httpVersion[0] - 0
+    ctx.host = ctx.major > 1 ? req.authority : (req.headers.host || self.host)
 
     ctx.bodyLength = 0
     ctx.maxBody = self.config.maxBody
@@ -147,12 +140,7 @@ Httpc.prototype.onRequest = function () {
     ctx.param = rt.args
     rt = null
 
-    return self.midware.run(ctx).finally(()=>{
-      ctx.stream = null
-      self.ctxpool.free(ctx)
-      ctx = null
-    })
-
+    return self.midware.run(ctx)
   }
 
   return callback

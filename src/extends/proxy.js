@@ -4,6 +4,35 @@ const urlparse = require('node:url');
 const http = require('node:http');
 const https = require('node:https');
 
+const HTTP2_PSEUDO_HEADERS = Object.create(null)
+HTTP2_PSEUDO_HEADERS[':method'] = true
+HTTP2_PSEUDO_HEADERS[':path'] = true
+HTTP2_PSEUDO_HEADERS[':scheme'] = true
+HTTP2_PSEUDO_HEADERS[':authority'] = true
+
+const IGNORE_HTTP2_HEADERS = {
+  'connection': true,
+  'keep-alive': true,
+  'transfer-encoding': true,
+  'proxy-connection': true
+}
+
+function cleanHeadersForHttp1(headers) {
+  const h1Headers = Object.create(null)
+  
+  for (const k in headers) {
+    if (!HTTP2_PSEUDO_HEADERS[k]) {
+      h1Headers[k] = headers[k]
+    }
+  }
+  
+  if (!h1Headers.host && headers[':authority']) {
+    h1Headers.host = headers[':authority']
+  }
+  
+  return h1Headers
+}
+
 // 主机名提取 (IPv6 兼容优化版)
 function extractHostname(host) {
   if (!host) return ''
@@ -461,7 +490,7 @@ class Proxy {
       let urlobj = self.copyUrlobj(pr.urlobj)
 
       urlobj.path = c.req.url
-      urlobj.headers = c.headers
+      urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
 
       if (self.addIP && urlobj.headers[self.realIPHeader]) {
@@ -517,10 +546,17 @@ class Proxy {
         h.on('response', res => {
           c.status(res.statusCode)
 
-          for (let k in res.headers) {
-            c.setHeader(k, res.headers[k])
+          if (c.major === 2) {
+            for (let k in res.headers) {
+              if (IGNORE_HTTP2_HEADERS[k]) continue
+              c.setHeader(k, res.headers[k])
+            }
+          } else {
+            for (let k in res.headers) {
+              c.setHeader(k, res.headers[k])
+            }
           }
-    
+
           res.on('data', chunk => {
             c.res.write(chunk)
           })
