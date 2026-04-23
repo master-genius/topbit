@@ -590,7 +590,7 @@ class Proxy {
         })
     
         c.req.on('data', chunk => {
-          h.write(chunk)
+          if (!h.destroyed) h.write(chunk)
         })
     
         c.req.on('end', () => {
