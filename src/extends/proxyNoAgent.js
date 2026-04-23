@@ -19,17 +19,17 @@ const IGNORE_HTTP2_HEADERS = {
 
 function cleanHeadersForHttp1(headers) {
   const h1Headers = Object.create(null)
-
+  
   for (const k in headers) {
     if (!HTTP2_PSEUDO_HEADERS[k]) {
       h1Headers[k] = headers[k]
     }
   }
-
+  
   if (!h1Headers.host && headers[':authority']) {
     h1Headers.host = headers[':authority']
   }
-
+  
   return h1Headers
 }
 
@@ -37,14 +37,15 @@ function cleanHeadersForHttp1(headers) {
 function extractHostname(host) {
   if (!host) return ''
   if (host.charCodeAt(0) === 91) { // '[' IPv6
-    const end = host.indexOf(']')
-    return end > -1 ? host.substring(0, end + 1) : host
+      const end = host.indexOf(']')
+      return end > -1 ? host.substring(0, end + 1) : host
   }
   const idx = host.indexOf(':')
   if (idx === -1) return host
   if (host.indexOf(':', idx + 1) !== -1) return host // 裸 IPv6
   return host.substring(0, idx)
 }
+
 
 /**
  * {
@@ -53,16 +54,16 @@ function extractHostname(host) {
  * {
  *    host : ''
  * }
- *
+ * 
  * {
  *    host : [
  *      {}
  *    ]
  * }
- *
+ * 
  */
 
-class Proxy {
+class ProxyNoAgent {
 
   constructor(options = {}) {
 
@@ -82,7 +83,7 @@ class Proxy {
 
     this.maxBody = 50000000
 
-    // 是否启用全代理模式
+    //是否启用全代理模式。
     this.full = false
 
     this.timeout = 35000
@@ -93,19 +94,15 @@ class Proxy {
 
     this.autoClearListeners = false
 
-    // 记录定时器
+    //记录定时器
     this.proxyIntervals = {}
 
     this.connectOptions = {
       family: 4
     }
 
-    this.maxFreeSockets = 100
-    this.maxSockets = 1000
-    this.agentKeepAlive = true
-
     this.error = {
-      '502': `<!DOCTYPE html><html>
+      '502' : `<!DOCTYPE html><html>
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -119,7 +116,7 @@ class Proxy {
           </body>
       </html>`,
 
-      '503': `<!DOCTYPE html><html>
+      '503' :`<!DOCTYPE html><html>
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -131,7 +128,7 @@ class Proxy {
               <p>此服务暂时不可用。</p>
             </div>
           </body>
-      </html>`
+      </html>` 
     }
 
     if (typeof options !== 'object') {
@@ -139,10 +136,10 @@ class Proxy {
     }
 
     this.balancer = (options.balancer
-      && options.balancer.select
-      && typeof options.balancer.select === 'function')
-      ? options.balancer
-      : null
+                    && options.balancer.select
+                      && typeof options.balancer.select === 'function')
+                    ? options.balancer
+                    : null
 
     for (let k in options) {
       switch (k) {
@@ -164,7 +161,7 @@ class Proxy {
             this.maxBody = parseInt(options[k])
           }
           break
-
+      
         case 'full':
         case 'debug':
         case 'autoClearListeners':
@@ -185,16 +182,6 @@ class Proxy {
           if (options[k] && typeof options[k] === 'object') {
             for (let o in options[k]) this.connectOptions[o] = options[k][o]
           }
-          break
-
-        case 'maxSockets':
-        case 'maxFreeSockets':
-          if (typeof options[k] === 'number' && options[k] && options[k] > 0) {
-            this[k] = options[k]
-          }
-          break
-        case 'agentKeepAlive':
-          this.agentKeepAlive = !!options[k]
           break
 
         default:;
@@ -220,7 +207,7 @@ class Proxy {
     }
 
     if (path.indexOf('/:') >= 0) {
-      return path.substring(0, path.length - 1)
+      return path.substring(0, path.length-1)
     }
 
     return `${path}*`
@@ -238,15 +225,14 @@ class Proxy {
     for (let k in cfg) {
 
       if (typeof cfg[k] === 'string') {
-        cfg[k] = [{ path: '/', url: cfg[k] }]
+        cfg[k] = [ { path : '/', url : cfg[k] } ]
 
       } else if (!(cfg[k] instanceof Array) && typeof cfg[k] === 'object') {
-        cfg[k] = [cfg[k]]
+        cfg[k] = [ cfg[k] ]
 
-      } else if (!(cfg[k] instanceof Array)) {
+      } else if ( !(cfg[k] instanceof Array) ) {
         continue
       }
-
       /**
        * {
        *    path : '',
@@ -255,124 +241,115 @@ class Proxy {
        *    headers : {}
        * }
        */
-      for (let i = 0; i < cfg[k].length; i++) {
-        tmp = cfg[k][i]
+        for (let i = 0; i < cfg[k].length; i++) {
+          tmp = cfg[k][i]
 
-        if (typeof tmp !== 'object' || (tmp instanceof Array)) {
-          console.error(`${k} ${JSON.stringify(tmp)} 错误的配置格式`)
-          continue
-        }
-
-        if (tmp.path === undefined) {
-          tmp.path = '/'
-        }
-
-        if (tmp.url === undefined) {
-          console.error(`${k} ${tmp.path}：没有指定要代理转发的url。`)
-          continue
-        }
-
-        if (this.urlpreg.test(tmp.url) === false) {
-          console.error(`${tmp.url} : 错误的url，请检查。`)
-          continue
-        }
-
-        pt = this.fmtpath(tmp.path)
-
-        if (tmp.url[tmp.url.length - 1] == '/') {
-          tmp.url = tmp.url.substring(0, tmp.url.length - 1)
-        }
-
-        if (tmp.headers !== undefined) {
-          if (typeof tmp.headers !== 'object') {
-            console.error(
-              `${k} ${tmp.url} ${tmp.path}：headers属性要求是object类型，使用key-value形式提供。`
-            );
+          if (typeof tmp !== 'object' || (tmp instanceof Array) ) {
+            console.error(`${k} ${JSON.stringify(tmp)} 错误的配置格式`)
             continue
           }
-        }
 
-        if (this.hostProxy[k] === undefined) {
-          this.hostProxy[k] = {}
-          this.proxyBalance[k] = {}
-        }
-
-        tmp.urlobj = this.parseUrl(tmp.url)
-        tmp.urlobj.timeout = tmp.timeout || this.timeout
-
-        // 每个后端独立连接池，keepAlive 复用连接
-        const agentOptions = {
-          keepAlive: this.agentKeepAlive,
-          maxSockets: this.maxSockets,
-          maxFreeSockets: this.maxFreeSockets,
-          timeout: (tmp.timeout || this.timeout) + 5000
-        }
-
-        backend_obj = {
-          url: tmp.url,
-          urlobj: tmp.urlobj,
-          headers: {},
-          path: tmp.path,
-          weight: 1,
-          weightCount: 0,
-          alive: true,
-          aliveCheckInterval: 5,
-          aliveCheckPath: '/',
-          intervalCount: 0,
-          rewrite: (tmp.rewrite && typeof tmp.rewrite === 'function') ? tmp.rewrite : null,
-          connectOptions: { ...this.connectOptions },
-          // 每个后端独立 Agent，https/http 分别创建
-          agent: tmp.urlobj.protocol === 'https:'
-            ? new https.Agent({ ...agentOptions, rejectUnauthorized: false, requestCert: false })
-            : new http.Agent(agentOptions)
-        }
-
-        // FIX: 原来是 typeof tmp.connectOptions（永远 truthy），修正为严格类型判断
-        if (tmp.connectOptions && typeof tmp.connectOptions === 'object') {
-          for (let o in tmp.connectOptions) {
-            backend_obj.connectOptions[o] = tmp.connectOptions[o]
+          if (tmp.path === undefined) {
+            tmp.path = '/'
           }
-        }
 
-        if (tmp.headers !== undefined) {
-          for (let h in tmp.headers) {
-            backend_obj.headers[h] = tmp.headers[h]
+          if (tmp.url === undefined) {
+            console.error(`${k} ${tmp.path}：没有指定要代理转发的url。`)
+            continue
           }
-        }
 
-        if (typeof tmp.aliveCheckPath === 'string' && tmp.aliveCheckPath.length > 0) {
-          if (tmp.aliveCheckPath[0] !== '/') {
-            tmp.aliveCheckPath = `/${tmp.aliveCheckPath}`
+          if (this.urlpreg.test(tmp.url) === false) {
+            console.error(`${tmp.url} : 错误的url，请检查。`)
+            continue
           }
-          backend_obj.aliveCheckPath = tmp.aliveCheckPath
-        }
 
-        if (tmp.weight && typeof tmp.weight === 'number' && tmp.weight > 1) {
-          backend_obj.weight = parseInt(tmp.weight)
-        }
-
-        if (tmp.aliveCheckInterval !== undefined && typeof tmp.aliveCheckInterval === 'number') {
-          if (tmp.aliveCheckInterval >= 0 && tmp.aliveCheckInterval <= 7200) {
-            backend_obj.aliveCheckInterval = tmp.aliveCheckInterval
+          pt = this.fmtpath(tmp.path)
+    
+          if (tmp.url[ tmp.url.length - 1 ] == '/') {
+            tmp.url = tmp.url.substring(0, tmp.url.length - 1)
           }
-        }
-
-        if (this.hostProxy[k][pt] === undefined) {
-          this.hostProxy[k][pt] = [backend_obj]
-          this.proxyBalance[k][pt] = {
-            stepIndex: 0,
-            useWeight: false
+    
+          if (tmp.headers !== undefined) {
+            if (typeof tmp.headers !== 'object') {
+              console.error(
+                `${k} ${tmp.url} ${tmp.path}：headers属性要求是object类型，使用key-value形式提供。`
+              );
+              continue
+            }
           }
-        } else if (this.hostProxy[k][pt] instanceof Array) {
-          this.hostProxy[k][pt].push(backend_obj)
-        }
 
-        if (backend_obj.weight > 1) {
-          this.proxyBalance[k][pt].useWeight = true
-        }
+          if (this.hostProxy[k] === undefined) {
+            this.hostProxy[k] = {}
+            this.proxyBalance[k] = {}
+          }
+    
+          tmp.urlobj = this.parseUrl(tmp.url)
 
-        this.pathTable[pt] = 1
-      } // end sub for
+          tmp.urlobj.timeout = tmp.timeout || this.timeout
+
+          backend_obj = {
+            url : tmp.url,
+            urlobj : tmp.urlobj,
+            headers : {},
+            path : tmp.path,
+            weight: 1,
+            weightCount : 0,
+            alive : true,
+            aliveCheckInterval : 5,
+            aliveCheckPath : '/',
+            intervalCount : 0,
+            rewrite: (tmp.rewrite && typeof tmp.rewrite === 'function') ? tmp.rewrite : null,
+            connectOptions: {...this.connectOptions}
+          }
+
+          if (tmp.connectOptions && typeof tmp.connectOptions) {
+            for (let o in tmp.connectOptions) {
+              backend_obj.connectOptions[o] = tmp.connectOptions[o]
+            }
+          }
+
+          if (tmp.headers !== undefined) {
+            for (let h in tmp.headers) {
+              backend_obj.headers[h] = tmp.headers[h]
+            }
+          }
+
+          if (typeof tmp.aliveCheckPath === 'string' && tmp.aliveCheckPath.length > 0) {
+            if (tmp.aliveCheckPath[0] !== '/') {
+              tmp.aliveCheckPath = `/${tmp.aliveCheckPath}`
+            }
+
+            backend_obj.aliveCheckPath = tmp.aliveCheckPath
+          }
+
+          if (tmp.weight && typeof tmp.weight === 'number' && tmp.weight > 1) {
+            backend_obj.weight = parseInt(tmp.weight)
+          }
+
+          if (tmp.aliveCheckInterval !== undefined && typeof tmp.aliveCheckInterval === 'number') {
+            if (tmp.aliveCheckInterval >= 0 && tmp.aliveCheckInterval <= 7200) {
+              backend_obj.aliveCheckInterval = tmp.aliveCheckInterval
+            }
+          }
+
+          if (this.hostProxy[k][pt] === undefined) {
+            
+            this.hostProxy[k][pt] = [ backend_obj ]
+            this.proxyBalance[k][pt] = {
+              stepIndex : 0,
+              useWeight : false
+            }
+            
+          } else if (this.hostProxy[k][pt] instanceof Array) {
+            this.hostProxy[k][pt].push(backend_obj)
+          }
+
+          if (backend_obj.weight > 1) {
+            this.proxyBalance[k][pt].useWeight = true
+          }
+
+          this.pathTable[pt] = 1
+        } //end sub for
     } // end for
   }
 
@@ -380,19 +357,19 @@ class Proxy {
     let u = new urlparse.URL(url)
 
     let urlobj = {
-      hash: u.hash,
+      hash    : u.hash,
       hostname: u.hostname,
       protocol: u.protocol,
-      path: u.pathname,
-      method: 'GET',
-      headers: {},
+      path    : u.pathname,
+      method  : 'GET',
+      headers : {},
     }
 
     if (u.search.length > 0) {
       urlobj.path += u.search
     }
-
-    if (u.protocol === 'unix:') {
+    
+    if (u.protocol  === 'unix:') {
       urlobj.protocol = 'http:'
       let sockarr = u.pathname.split('.sock')
       urlobj.socketPath = `${sockarr[0]}.sock`
@@ -401,12 +378,12 @@ class Proxy {
       urlobj.host = u.host
       urlobj.port = u.port
     }
-
+  
     if (u.protocol === 'https:') {
       urlobj.requestCert = false
       urlobj.rejectUnauthorized = false
     }
-
+  
     return urlobj
   }
 
@@ -439,9 +416,8 @@ class Proxy {
   getBackend(c, host) {
     let prlist = this.hostProxy[host][c.routepath]
     let pb = this.proxyBalance[host][c.routepath]
-
     if (this.balancer) {
-      return this.balancer.select(c, prlist, pb)
+      return this.balancer.select(c, prlist, pxybalance)
     }
 
     let pr
@@ -469,7 +445,9 @@ class Proxy {
 
     if (pr.alive === false) {
       for (let i = 0; i < prlist.length; i++) {
+        
         pr = prlist[i]
+
         if (pr.alive === true) {
           return pr
         }
@@ -486,9 +464,10 @@ class Proxy {
     timeoutError.code = 'ETIMEOUT'
 
     return async (c, next) => {
-      let host = extractHostname(c.host)
 
-      if (self.hostProxy[host] === undefined || self.hostProxy[host][c.routepath] === undefined) {
+      let host = extractHostname(c.host)
+      
+      if (self.hostProxy[host]===undefined || self.hostProxy[host][c.routepath]===undefined) {
         if (self.full) {
           return c.status(502).to(self.error['502'])
         }
@@ -499,14 +478,13 @@ class Proxy {
 
       if (pr === null) {
         for (let i = 0; i < 50; i++) {
-          await new Promise((rv) => { setTimeout(rv, 10) })
+          await new Promise((rv, rj) => {setTimeout(rv, 10)})
           pr = self.getBackend(c, host)
           if (pr) break
         }
 
-        if (!pr) {
+        if (!pr)
           return c.status(503).to(self.error['503'])
-        }
       }
 
       let urlobj = self.copyUrlobj(pr.urlobj)
@@ -514,9 +492,6 @@ class Proxy {
       urlobj.path = c.req.url
       urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
-
-      // 挂载后端独立 Agent，复用连接池
-      urlobj.agent = pr.agent
 
       if (self.addIP && urlobj.headers[self.realIPHeader]) {
         urlobj.headers[self.realIPHeader] += `,${c.ip}`
@@ -532,7 +507,7 @@ class Proxy {
 
       if (pr.rewrite) {
         let rw = pr.rewrite(c, c.req.url)
-
+        
         if (rw) {
           let path_typ = typeof rw
           if (path_typ === 'string') {
@@ -544,10 +519,6 @@ class Proxy {
       }
 
       let h = hci.request(urlobj)
-
-      // 用业务标志位显式跟踪后端响应是否完整接收
-      // 不依赖任何私有/非文档属性（如 h.res）
-      let responseComplete = false
 
       return await new Promise((rv, rj) => {
         let resolved = false
@@ -565,8 +536,6 @@ class Proxy {
           !h.destroyed && h.destroy(timeoutError)
         })
 
-        // h.on('close') 作为兜底：
-        // 后端无 response（如后端 crash）时，防止 Promise 永久挂起
         h.on('close', () => {
           if (!resolved && !rejected) {
             resolved = true
@@ -593,29 +562,24 @@ class Proxy {
           }
 
           res.on('data', chunk => {
-            // 客户端已断开则不再写入，避免写入已关闭的流
             c.res.writable && c.res.write(chunk)
           })
-
+      
           res.on('end', () => {
-            // 标记后端响应已完整接收，finally 中据此决定是否归还连接给 Agent
-            responseComplete = true
-
-            // 客户端已断开则不再 end
-            c.res.writable && c.res.end()
+            c.res.end()
 
             if (!resolved && !rejected) {
               resolved = true
               rv()
             }
           })
-
-          res.on('error', err => {
-            if (!resolved && !rejected) {
-              rejected = true
-              rj(err)
-            }
-          })
+      
+            res.on('error', err => {
+                if (!resolved && !rejected){
+                  rejected = true
+                  rj(err)
+                }
+            })
         })
 
         h.on('error', (err) => {
@@ -624,57 +588,37 @@ class Proxy {
             rj(err)
           }
         })
-
+    
         c.req.on('data', chunk => {
-          // h 已被提前 destroy 时（超时/客户端断开），不再写入
-          // 避免抛出 ERR_STREAM_DESTROYED 未捕获异常
-          if (h.destroyed) return
-
-          // 背压控制：write 返回 false 时暂停上游，等 drain 后恢复
-          let ok = h.write(chunk)
-          if (!ok) {
-            c.req.pause()
-            h.once('drain', () => {
-              c.req.resume()
-            })
-          }
+          if (!h.destroyed) h.write(chunk)
         })
-
+    
         c.req.on('end', () => {
-          // h 未销毁才 end，否则忽略
-          !h.destroyed && h.end()
+          h.end()
         })
+    
       }).catch(err => {
-        self.debug && console.error(err)
-        c.status(503).to(self.error['503'])
+        self.debug && console.error(err);
+        c.status(503).to(self.error['503']);
       })
       .finally(() => {
-        if (self.autoClearListeners && h.removeAllListeners) {
-          h.removeAllListeners()
-        }
-
-        // responseComplete 为 true：响应已正常完成，Agent 自动归还 socket，无需 destroy
-        // responseComplete 为 false：异常/超时/客户端断开，兜底销毁，释放资源
-        if (!h.destroyed && !responseComplete) {
-          h.destroy()
-        }
+        this.autoClearListeners && h.removeAllListeners && h.removeAllListeners();
+        !h.destroyed && h.destroy();
       })
 
     }
 
   }
 
-  timerRequest(pxy, timeout = false) {
+  timerRequest(pxy, timeout=false) {
     let h = http
 
     let opts = {
-      timeout: this.timeout + 30_000,
+      timeout : this.timeout + 30_000,
       method: 'TRACE',
       headers: {
         'user-agent': 'Node.js/Topbit,Topbit-Toolkit: Proxy,AliveCheck'
-      },
-      // 存活检测复用后端的 Agent
-      agent: pxy.agent
+      }
     }
 
     if (pxy.urlobj.protocol === 'https:') {
@@ -690,10 +634,10 @@ class Proxy {
     let aliveUrl = `${pxy.urlobj.protocol}//${pxy.urlobj.host}${pxy.aliveCheckPath}`
 
     let req = h.request(aliveUrl, opts)
-
+    
     req.on('error', err => {
       pxy.alive = false
-      // 出现连接错误时，短暂延迟后重试一次，排除服务重启等瞬时抖动
+      //当出现连接错误，立即发起一个请求，测试是否是某些特殊情况导致的异常，比如服务重启导致瞬间请求失败。
       if (!timeout) {
         setTimeout(() => {
           this.timerRequest(pxy, true)
@@ -704,12 +648,14 @@ class Proxy {
     req.on('response', res => {
       pxy.alive = true
 
-      res.on('error', err => { })
+      res.on('error', err => {
+
+      })
 
       res.on('data', chunk => {
         pxy.alive = true
       })
-
+      
       res.on('end', () => {
         pxy.alive = true
       })
@@ -726,7 +672,7 @@ class Proxy {
     }
 
     if (count === 0) return null
-
+    
     let self = this
 
     return setInterval(() => {
@@ -740,27 +686,32 @@ class Proxy {
           self.timerRequest(pxys[i])
         }
       }
+
     }, 1000)
+    
   }
 
   init(app) {
     app.config.timeout = this.timeout
 
     for (let p in this.pathTable) {
-      app.router.map(this.methods, p, async c => { }, '@titbit_proxy')
+      app.router.map(this.methods, p, async c => {}, '@titbit_proxy')
     }
 
-    app.use(this.mid(), { pre: true, group: `titbit_proxy` })
+    app.use(this.mid(), {pre: true, group: `titbit_proxy`})
 
     for (let k in this.hostProxy) {
+
       this.proxyIntervals[k] = {}
 
       for (let p in this.hostProxy[k]) {
         this.proxyIntervals[k][p] = this.setTimer(this.hostProxy[k][p])
       }
+      
     }
+
   }
 
 }
 
-module.exports = Proxy
+module.exports = ProxyNoAgent
