@@ -4,13 +4,18 @@ process.chdir(__dirname)
 
 let Topbit = require('../src/topbit.js')
 
-let {Proxy} = Topbit.extensions
+let {Proxy, ProxyNoAgent} = Topbit.extensions
 
 const npargv = Topbit.npargv
 
 let {args} = npargv({
   '--httpc': {
     name: 'httpc',
+    default: false,
+  },
+
+  '--agent': {
+    name: 'agent',
     default: false,
   }
 })
@@ -25,28 +30,31 @@ let app = new Topbit({
   key: args.httpc ? './cert/x.com.key' : '',
 })
 
+let proxy_class = ProxyNoAgent
+if (args.agent) proxy_class = Proxy
+
 if (app.isWorker) {
-  let pxy = new Proxy({
+  let pxy = new proxy_class({
     config: {
       'w.com': [
         {
-          url: 'http://localhost:3001',
+          url: 'http://127.0.0.1:3001',
           weight: 10,
           path : '/',
-          reconnDelay: 200,
-          max: 2,
+          reconnDelay: 20,
+          max: 1000,
           headers: {
             'x-test-key': `${Date.now()}-${Math.random()}`
           },
-          connectTimeout: 2000
+          connectTimeout: 20000
         },
 
         {
-          url: 'http://localhost:3002',
+          url: 'http://127.0.0.1:3002',
           weight: 4,
           path : '/',
-          max: 2,
-          reconnDelay: 100,
+          max: 1000,
+          reconnDelay: 10,
           headers: {
             'x-test-key2': `${Date.now()}-${Math.random()}`
           }
