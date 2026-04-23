@@ -528,9 +528,9 @@ class Proxy {
           !h.destroyed && h.destroy(timeoutError)
         })
 
-        c.res.on('timeout', () => {
+        /* c.res.on('timeout', () => {
           !h.destroyed && h.destroy(timeoutError)
-        })
+        }) */
 
         h.on('timeout', () => {
           !h.destroyed && h.destroy(timeoutError)
@@ -557,8 +557,12 @@ class Proxy {
             }
           }
 
+          if (c.res.flushHeaders) {
+            c.res.flushHeaders()
+          }
+
           res.on('data', chunk => {
-            c.res.write(chunk)
+            c.res.writable && c.res.write(chunk)
           })
       
           res.on('end', () => {
@@ -591,6 +595,14 @@ class Proxy {
     
         c.req.on('end', () => {
           h.end()
+        })
+
+        //close其实是触发到socket上的，req和res共享
+        c.req.on('close', () => {
+          // 如果客户端提前断开连接，必须断开与后端的代理连接
+          if (!h.destroyed) {
+            h.destroy()
+          }
         })
     
       }).catch(err => {

@@ -531,6 +531,11 @@ Http2Proxy.prototype.mid = function () {
 
                 c.res.setHeader(k, headers[k])
               }
+
+              // 🌟 新增：强制将 HTTP/1 的 Headers 发送出去
+              if (c.res.flushHeaders) {
+                c.res.flushHeaders()
+              }
             }
           }
 
