@@ -590,7 +590,16 @@ class ProxyNoAgent {
         })
     
         c.req.on('data', chunk => {
-          if (!h.destroyed) h.write(chunk)
+          if (h.destroyed) return
+
+          // 背压控制：write 返回 false 时暂停上游，等 drain 后恢复
+          let ok = h.write(chunk)
+          if (!ok) {
+            c.req.pause()
+            h.once('drain', () => {
+              c.req.resume()
+            })
+          }
         })
     
         c.req.on('end', () => {
@@ -695,10 +704,10 @@ class ProxyNoAgent {
     app.config.timeout = this.timeout
 
     for (let p in this.pathTable) {
-      app.router.map(this.methods, p, async c => {}, '@titbit_proxy')
+      app.router.map(this.methods, p, async c => {}, '@topbit_proxy')
     }
 
-    app.use(this.mid(), {pre: true, group: `titbit_proxy`})
+    app.use(this.mid(), {pre: true, group: `topbit_proxy`})
 
     for (let k in this.hostProxy) {
 
