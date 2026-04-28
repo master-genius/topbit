@@ -46,7 +46,8 @@ if (app.isWorker) {
           headers: {
             'x-test-key': `${Date.now()}-${Math.random()}`
           },
-          connectTimeout: 20000
+          connectTimeout: 20000,
+          aliveCheckInterval: 20000
         },
 
         {
@@ -57,7 +58,9 @@ if (app.isWorker) {
           reconnDelay: 10,
           headers: {
             'x-test-key2': `${Date.now()}-${Math.random()}`
-          }
+          },
+          aliveCheckInterval: 20000
+
         }
       ]
     },
