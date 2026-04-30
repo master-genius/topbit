@@ -105,7 +105,7 @@ class Context {
   }
 
   sendHeader() {
-    !this.res
+    this.res
       && !this.res.headersSent
       && this.res.writeHead(this.res.statusCode)
 
