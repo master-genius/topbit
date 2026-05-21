@@ -297,6 +297,9 @@ class ProxyNoAgent {
             alive : true,
             aliveCheckInterval : 5,
             aliveCheckPath : '/',
+            aliveCheckMethod: (tmp.aliveCheckMethod
+                              && (['GET', 'TRACE', 'HEAD'].includes(tmp.aliveCheckMethod)) )
+                            ? tmp.aliveCheckMethod : 'GET',
             intervalCount : 0,
             rewrite: (tmp.rewrite && typeof tmp.rewrite === 'function') ? tmp.rewrite : null,
             connectOptions: {...this.connectOptions}
@@ -624,7 +627,7 @@ class ProxyNoAgent {
 
     let opts = {
       timeout : this.timeout + 30_000,
-      method: 'TRACE',
+      method: pxy.aliveCheckMethod || 'GET',
       headers: {
         'user-agent': 'Node.js/Topbit,Topbit-Toolkit: Proxy,AliveCheck'
       }
