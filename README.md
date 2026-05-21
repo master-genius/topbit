@@ -114,7 +114,7 @@ The first 6 are the most commonly used. For each request type, the router has a 
 
 'use strict'
 
-const Topbit = require('topibit')
+const Topbit = require('topbit')
 
 const app = new Topbit({
   debug: true
