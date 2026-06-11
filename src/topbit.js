@@ -180,7 +180,8 @@ class Topbit {
       maxBody   : 50_000_000,
       maxFiles      : 12,
       daemon        : false, //开启守护进程
-  
+      
+      cpus: 0,
       //开启守护进程模式后，如果设置路径不为空字符串，则会把pid写入到此文件，可用于服务管理。
       pidFile       : '',
       logFile       : '',
@@ -352,6 +353,7 @@ class Topbit {
         case 'requestTimeout':
         case 'timeout':
         case 'streamTimeout':
+        case 'cpus':
           optionsCheck(k, options[k], this.config, {type: 'number', min: 0});
           break;
   
@@ -1017,7 +1019,7 @@ class Topbit {
 
   autoWorker(max) {
     if (!isNaN(max) && typeof max === 'number' && max >= 0) {
-      this.workerCount.max = max > 0 ? max : os.cpus().length;
+      this.workerCount.max = max > 0 ? max : (os.cpus().length || this.config.cpus || 2);
     } else {
       throw new Error('autoWorker参数必须是一个>=0的数字，表示最大允许创建多少个子进程处理请求。');
     }
@@ -1254,7 +1256,7 @@ class Topbit {
     //this._checkDaemonArgs();
     
     if (cluster.isPrimary || cluster.isMaster) {
-      let osCPUS = os.cpus().length;
+      let osCPUS = os.cpus().length || (this.config.cpus || 2);
       if (num > (osCPUS * 2) ) {
         num = 0;
       }

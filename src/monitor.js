@@ -19,7 +19,7 @@ class Monitor {
 
     this.isLoadObj = ['obj', 'orgobj'].includes(this.config.loadInfoType)
 
-    this.rundata.cpus = os.cpus().length
+    this.rundata.cpus = os.cpus().length || (this.config.cpus || 2)
 
     this.loadCount = 0
     this.loadInfo = {}
