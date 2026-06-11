@@ -1,17 +1,79 @@
-'use strict'
+'use strict';
 
-const Titbit = require('titbit')
+const Topbit = require('topbit')
+const npargv = Topbit.npargv
 
-const app = new Titbit({
-  debug: true,
+let {args} = npargv({
+  '--loadtype': {
+    name: 'loadtype',
+    default: 'text',
+    limit: ['text', 'obj', 'orgobj']
+  },
+  '--load': {
+    name: 'load',
+    default: false
+  },
+
+  '--http2': {
+    name: 'http2',
+    default: false
+  }
 })
 
-app.get('/', async ctx => {
-  ctx.send('success')
+const app = new Topbit({
+    debug : true,
+    maxIPRequest: 2,
+    unitTime: 10,
+    useLimit: true,
+    maxConn: 2000,
+    http2: args.http2,
+    loadMonitor: true,
+    loadInfoType : args.loadtype,
+    globalLog : true,
+    logType: 'stdio',
+    loadInfoFile : args.load ? '' : '/tmp/topbit-loadinfo.log',
+    maxLoadRate: 0.6
 })
 
-app.post('/', async ctx => {
-  ctx.send(ctx.body)
-})
+app.get('/', async c => {
+    c.to('ok')
+}, 'home')
 
-app.run(1234)
+app.get('/test', async c => {
+    //await c.ext.delay(10)
+    let sum = 0
+    for (let i = 0; i < 90000; i++) {
+        sum += Math.random() * i
+    }
+
+    c.setHeader(`x-test-${Math.floor(Math.random() * 100)}`, sum).to({sum})
+}, {group: 'test', name : 'test'})
+
+app.post('/test', async c => {
+    c.to(c.body)
+}, {group: 'test', name : 'test-post'})
+
+app.post('/transmit', async c => {
+    c.to('ok')
+}, 'transmit')
+
+app.use(async (c, next) => {
+    let total = 0;
+    
+    c.box.dataHandle = (data) => {
+        total += data.length;
+        if (total > 1000) {
+            c.res.statusCode = 413
+            c.res.end('太多了，限制1000字节以内')
+            return
+        }
+    }
+
+    await next(c)
+
+    console.log(total, 'bytes')
+}, {pre: true, method: 'POST', name: 'transmit'})
+
+app.autoWorker(4)
+
+app.printServInfo().daemon(2034, 1)
