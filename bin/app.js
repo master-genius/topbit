@@ -1,4 +1,4 @@
-'use strict';
+'use strict'
 
 const Topbit = require('topbit')
 const npargv = Topbit.npargv
