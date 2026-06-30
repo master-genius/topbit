@@ -481,7 +481,7 @@ class ProxyNoAgent {
 
       if (pr === null) {
         for (let i = 0; i < 50; i++) {
-          await new Promise((rv, rj) => {setTimeout(rv, 10)})
+          await new Promise((rv, rj) => {setTimeout(rv, 60)})
           pr = self.getBackend(c, host)
           if (pr) break
         }
