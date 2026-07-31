@@ -43,7 +43,20 @@ class Http2Pool {
   _createConnection() {
     if (this.sessions.length >= this.maxConnect) return null
 
-    const session = http2.connect(this.url, this.connectOptions)
+    let session
+
+    if (this.url && this.url.startsWith('unix://')) {
+      // http2.connect 不支持 unix 协议，通过 createConnection 提供 unix socket 连接
+      const net = require('node:net')
+      const u = new URL(this.url)
+      const sockarr = u.pathname.split('.sock')
+      session = http2.connect(`http://localhost${sockarr[1] || '/'}`, {
+        ...this.connectOptions,
+        createConnection: () => net.connect(sockarr[0] + '.sock')
+      })
+    } else {
+      session = http2.connect(this.url, this.connectOptions)
+    }
     
     const wrapper = {
       id: crypto.randomBytes(8).toString('hex'),

@@ -78,7 +78,7 @@ class Proxy {
 
     this.config = {}
 
-    this.urlpreg = /(unix|http|https):\/\/[a-zA-Z0-9\-\_]+/
+    this.urlpreg = /(?:unix:\/\/\/[a-zA-Z0-9\-\_\/\.]+|unix:\/\/[a-zA-Z0-9\-\_]+|(?:http|https):\/\/[\[a-zA-Z0-9\-\_]+)/
 
     this.maxBody = 50000000
 
@@ -312,6 +312,8 @@ class Proxy {
           url: tmp.url,
           urlobj: tmp.urlobj,
           headers: {},
+          resHeaders: null,
+          resHeadersCallback: null,
           path: tmp.path,
           weight: 1,
           weightCount: 0,
@@ -342,6 +344,20 @@ class Proxy {
             backend_obj.headers[h] = tmp.headers[h]
           }
         }
+
+        if (tmp.resHeaders !== undefined) {
+          if (typeof tmp.resHeaders === 'object' && !(tmp.resHeaders instanceof Array)) {
+            backend_obj.resHeaders = tmp.resHeaders
+          } else {
+            console.error(
+              `${k} ${tmp.url} ${tmp.path}：resHeaders属性要求是object类型，使用key-value形式提供。`
+            )
+          }
+        }
+
+        // 解析时判定类型，非函数置 null，运行时直接条件判断
+        backend_obj.resHeadersCallback =
+          (typeof tmp.resHeadersCallback === 'function') ? tmp.resHeadersCallback : null
 
         if (typeof tmp.aliveCheckPath === 'string' && tmp.aliveCheckPath.length > 0) {
           if (tmp.aliveCheckPath[0] !== '/') {
@@ -518,6 +534,11 @@ class Proxy {
       urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
 
+      // 合并配置的自定义请求头（配置覆盖客户端同名头）
+      for (let k in pr.headers) {
+        urlobj.headers[k] = pr.headers[k]
+      }
+
       // 挂载后端独立 Agent，复用连接池
       urlobj.agent = pr.agent
 
@@ -588,6 +609,20 @@ class Proxy {
           } else {
             for (let k in res.headers) {
               c.setHeader(k, res.headers[k])
+            }
+          }
+
+          // 配置的响应消息头：resHeadersCallback 优先，返回对象则设置；否则设置静态 resHeaders
+          if (pr.resHeadersCallback) {
+            let rh = pr.resHeadersCallback(c)
+            if (rh && typeof rh === 'object') {
+              for (let k in rh) {
+                c.setHeader(k, rh[k])
+              }
+            }
+          } else if (pr.resHeaders) {
+            for (let k in pr.resHeaders) {
+              c.setHeader(k, pr.resHeaders[k])
             }
           }
 
@@ -690,7 +725,13 @@ class Proxy {
       opts[o] = pxy.connectOptions[o]
     }
 
-    let aliveUrl = `${pxy.urlobj.protocol}//${pxy.urlobj.host}${pxy.aliveCheckPath}`
+    if (pxy.urlobj.socketPath) {
+      opts.socketPath = pxy.urlobj.socketPath
+    }
+
+    let aliveUrl = pxy.urlobj.socketPath
+      ? `${pxy.urlobj.protocol}//unix${pxy.aliveCheckPath}`
+      : `${pxy.urlobj.protocol}//${pxy.urlobj.host}${pxy.aliveCheckPath}`
 
     let req = h.request(aliveUrl, opts)
 

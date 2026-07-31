@@ -71,7 +71,7 @@ let Http2Proxy = function (options = {}) {
 
   if (typeof options !== 'object') options = {}
 
-  this.urlpreg = /(unix|http|https):\/\/[a-zA-Z0-9\-\_]+/
+  this.urlpreg = /(?:unix:\/\/\/[a-zA-Z0-9\-\_\/\.]+|unix:\/\/[a-zA-Z0-9\-\_]+|(?:http|https):\/\/[\[a-zA-Z0-9\-\_]+)/
 
   this.hostProxy = {}
   this.proxyBalance = {}
@@ -213,6 +213,14 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
 
   }
 
+  if (tmp.resHeaders && typeof tmp.resHeaders === 'object' && !(tmp.resHeaders instanceof Array)) {
+    backend_obj.resHeaders = tmp.resHeaders
+  }
+
+  // 解析时判定类型，非函数置 null，运行时直接条件判断
+  backend_obj.resHeadersCallback =
+    (typeof tmp.resHeadersCallback === 'function') ? tmp.resHeadersCallback : null
+
   if (tmp.maxConnect && typeof tmp.maxConnect === 'number' && tmp.maxConnect > 1)
     backend_obj.maxConnect = tmp.maxConnect
 
@@ -263,6 +271,8 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
       backend_obj = {
         url: tmp.url,
         headers: null,
+        resHeaders: null,
+        resHeadersCallback: null,
         path: tmp.path,
         pathLength: tmp.path.length,
         rewrite: false,
@@ -372,7 +382,7 @@ Http2Proxy.prototype.getBackend = function (c, host) {
 Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
   let http2_headers = {
     ':method': ctx.method,
-    ':path': headers[':path'] || ctx.request.url || ctx.path,
+    ':path': headers[':path'] || (ctx.req && ctx.req.url) || ctx.path,
   }
 
   for (let k in headers) {
@@ -522,6 +532,16 @@ Http2Proxy.prototype.mid = function () {
         stm.on('response', (headers, flags) => {
           if (c.res && c.res.writable) {
             if (c.res.respond) {
+              // HTTP/2：合并配置的响应消息头后一次性发送
+              if (pr.resHeadersCallback) {
+                let rh = pr.resHeadersCallback(c)
+                if (rh && typeof rh === 'object') {
+                  for (let k in rh) headers[k] = rh[k]
+                }
+              } else if (pr.resHeaders) {
+                for (let k in pr.resHeaders) headers[k] = pr.resHeaders[k]
+              }
+
               c.res.respond(headers)
             } else if (c.res.setHeader) {
               c.status(headers[':status'])
@@ -530,6 +550,16 @@ Http2Proxy.prototype.mid = function () {
                 if (typeof k !== 'string' || k[0] === ':') continue
 
                 c.res.setHeader(k, headers[k])
+              }
+
+              // 配置的响应消息头：resHeadersCallback 优先，返回对象则设置；否则设置静态 resHeaders
+              if (pr.resHeadersCallback) {
+                let rh = pr.resHeadersCallback(c)
+                if (rh && typeof rh === 'object') {
+                  for (let k in rh) c.res.setHeader(k, rh[k])
+                }
+              } else if (pr.resHeaders) {
+                for (let k in pr.resHeaders) c.res.setHeader(k, pr.resHeaders[k])
               }
 
               // 🌟 新增：强制将 HTTP/1 的 Headers 发送出去
