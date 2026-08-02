@@ -307,7 +307,8 @@ class ProxyNoAgent {
             connectOptions: {...this.connectOptions}
           }
 
-          if (tmp.connectOptions && typeof tmp.connectOptions) {
+          // FIX: 原来是 typeof tmp.connectOptions（永远 truthy），修正为严格类型判断
+          if (tmp.connectOptions && typeof tmp.connectOptions === 'object') {
             for (let o in tmp.connectOptions) {
               backend_obj.connectOptions[o] = tmp.connectOptions[o]
             }
@@ -436,7 +437,7 @@ class ProxyNoAgent {
     let prlist = this.hostProxy[host][c.routepath]
     let pb = this.proxyBalance[host][c.routepath]
     if (this.balancer) {
-      return this.balancer.select(c, prlist, pxybalance)
+      return this.balancer.select(c, prlist, pb)
     }
 
     let pr
@@ -604,7 +605,7 @@ class ProxyNoAgent {
           })
       
           res.on('end', () => {
-            c.res.end()
+            c.res.writable && c.res.end()
 
             if (!resolved && !rejected) {
               resolved = true
@@ -641,7 +642,8 @@ class ProxyNoAgent {
         })
     
         c.req.on('end', () => {
-          h.end()
+          // h 未销毁才 end，否则忽略
+          !h.destroyed && h.end()
         })
     
       }).catch(err => {
