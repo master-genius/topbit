@@ -1158,7 +1158,7 @@ class Topbit {
 
   /**
    * 根据配置情况确定运行HTTP/1.1还是HTTP/2
-   * @param {number} port 端口号
+   * @param {number|string|object} port 端口号
    * @param {string} host IP地址，可以是IPv4或IPv6
    * 0.0.0.0 对应使用IPv6则是::
   */
@@ -1167,10 +1167,12 @@ class Topbit {
 
     if (typeof port === 'object') {
       if (port.host && typeof port.host === 'string') host = port.host;
-      if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
+      //if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
     }
 
-    if (this.config.server.SNICallback && typeof this.config.server.SNICallback === 'function' && !this.config.https) {
+    if (this.config.server.SNICallback
+        && typeof this.config.server.SNICallback === 'function'
+        && !this.config.https) {
       this.config.https = true;
     }
 
@@ -1178,8 +1180,8 @@ class Topbit {
   
     this.router.argsRouteSort();
   
-    this.rundata.host = (typeof port == 'number' ? host : '');
-    this.rundata.port = port;
+    this.rundata.host = (typeof port == 'object' ? (port.host||'') : (typeof port == 'number' ? host : ''));
+    this.rundata.port = typeof port == 'object' ? port.port : port;
   
     //如果没有添加路由则添加默认路由
     if (this.router.count === 0) {
@@ -1228,7 +1230,7 @@ class Topbit {
 
   /**
    * 这个函数是可以用于运维部署，此函数默认会根据CPU核数创建对应的子进程处理请求。
-   * @param {number} port 端口号
+   * @param {number|string|object} port 端口号
    * @param {string} IP地址，IPv4或IPv6，如果检测为数字，则会把数字赋值给num。
    * @param {number} num，要创建的子进程数量，0表示自动，这时候根据CPU核心数量创建。
   */
@@ -1242,8 +1244,8 @@ class Topbit {
     
     if (typeof port === 'object') {
       if (port.host && typeof port.host === 'string') host = port.host;
-      if (port.worker && typeof port.worker === 'number') num = port.worker;
-      if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
+      if (port.workers && typeof port.workers === 'number' && port.workers > 0) num = port.workers;
+      //if (port.port && typeof port.port === 'number' && port.port > 0 && port.port <= 65535) port = port.port;
     }
 
     this._is_daemon_listening = true;
@@ -1270,7 +1272,7 @@ class Topbit {
       }
 
       this.workerCount.total = num;
-      this.rundata.port = port;
+      this.rundata.port = typeof port === 'object' ? port.port : port;
       //根据num设定secure的内存限制。
       if (num > 1) {
         for (let k in this.secure) {
@@ -1278,7 +1280,7 @@ class Topbit {
         }
       }
 
-      this.rundata.host = (typeof port === 'number' ? host : '');
+      this.rundata.host = (typeof port === 'object' ? (port.host||'') : (typeof port === 'number' ? host : ''));
 
       if (typeof this.config.loadInfoFile !== 'string') {
         this.config.loadInfoFile = '';

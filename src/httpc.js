@@ -148,7 +148,7 @@ Httpc.prototype.onRequest = function () {
 
 /** 
    * 运行HTTP/1.1服务
-   * @param {number} port 端口号
+   * @param {number|string|object} port 端口号
    * @param {string} host IP地址，可以是IPv4或IPv6
    * 0.0.0.0 对应使用IPv6则是::
   */
@@ -224,6 +224,10 @@ Httpc.prototype.run = function (port, host) {
   //说明是使用unix socket模式监听服务
   if (typeof port === 'string' && port.indexOf('.sock') > 0) {
     serv.listen(port)
+  } else if (typeof port === 'object') {
+    this.host = port.host || host || ''
+    serv.listen(port)
+    port.port && (port.port != 443) && (this.host += `:${port.port}`)
   } else {
     this.host = host
     if (port !== 443) {

@@ -10,6 +10,7 @@ const fsp = fs.promises
 let _typemap = {
   '.css'  : 'text/css; charset=utf-8',
   '.js'   : 'text/javascript; charset=utf-8',
+  '.wasm' : 'application/wasm',
   '.txt'  : 'text/plain; charset=utf-8',
   '.json' : 'application/json; charset=utf-8',
   '.lrc'  : 'text/plain; charset=utf-8',

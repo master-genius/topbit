@@ -220,7 +220,7 @@ class Httpt {
 
   /** 
    * 运行HTTP/2服务
-   * @param {number} port 端口号
+   * @param {number|string|object} port 端口号
    * @param {string} host IP地址，可以是IPv4或IPv6
    * 0.0.0.0 对应使用IPv6则是::
   */
@@ -311,6 +311,10 @@ class Httpt {
     if (typeof port === 'string' && port.indexOf('.sock') > 0) {
       this.host = port;
       serv.listen(port);
+    } else if (typeof port === 'object') {
+      this.host = port.host || host || '';
+      serv.listen(port);
+      port.port && (port.port != 443 && port.port != 80) && (this.host += `:${port.port}`);
     } else {
       this.host = host;
       if (port !== 80 && port !== 443) {
