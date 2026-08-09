@@ -4,6 +4,7 @@
 
 const zlib = require('node:zlib')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 
 const fsp = fs.promises
 
@@ -73,7 +74,8 @@ class Resource {
 
     this.failedLimit = 50
 
-    this.compress = true
+    // 缓存条目 stat 校验周期（毫秒）：周期内不重复 stat，最多滞后 checkInterval 检测到文件变更
+    this.checkInterval = 600000
 
     this.cacheControl = null
 
@@ -110,8 +112,10 @@ class Resource {
           }
           break
 
-        case 'compress':
-          this.compress = options[k]
+        case 'checkInterval':
+          if (typeof options[k] === 'number' && options[k] >= 0) {
+            this.checkInterval = options[k]
+          }
           break
 
         case 'cacheControl':
@@ -187,7 +191,7 @@ class Resource {
 
   extName(filename) {
     let extind = filename.length - 1
-    let extstart = filename.length - 5
+    let extstart = filename.length - 6
 
     while (extind > 0 && extind >= extstart) {
       if (filename[extind] === '.') break
@@ -243,10 +247,8 @@ class Resource {
 
     return new Promise((rv, rj) => {
       stm.on('data', data => {
-        if (filesize <= this.maxFileSize) {
-          total += data.length
-          dataBuffer.push(data)
-        }
+        total += data.length
+        dataBuffer.push(data)
       })
 
       stm.on('error', err => {
@@ -290,7 +292,7 @@ class Resource {
         }
       }
 
-      if (real_path.indexOf('/../') >= 0) {
+      if (real_path.indexOf('/../') >= 0 || real_path.indexOf('\\..\\') >= 0) {
         return c.status(404).to('file not found')
       }
 
@@ -299,18 +301,45 @@ class Resource {
       if (self.cache.has(real_path)) {
         let r = self.cache.get(real_path)
 
-        c.setHeader('content-type', r.type)
-        c.setHeader('content-length', r.data.length)
-        
-        if (r.gzip) {
-          c.setHeader('content-encoding', 'gzip')
+        // 周期内不重复 stat；超周期校验文件是否变更（size + mtime）
+        if (Date.now() - r.checkTime > self.checkInterval) {
+          let fst = await fsp.stat(pathfile).catch(() => null)
+          if (!fst || fst.size !== r.size || fst.mtimeMs !== r.mtime) {
+            // 文件被删或变更 → 失效，删条目走下方新鲜读取
+            self.cache.delete(real_path)
+            self.size -= r.data.length
+          } else {
+            r.checkTime = Date.now()
+          }
         }
 
-        if (self.cacheControl) {
-          c.setHeader('cache-control', self.cacheControl)
-        }
+        if (self.cache.has(real_path)) {
+          let etag = `"${r.size}-${r.hash}"`
+          let inm = c.headers['if-none-match']
 
-        return c.to(r.data)
+          // RFC 9110：If-None-Match 支持 * 与逗号分隔的多值
+          if (inm && (inm === '*' || inm.split(',').map(s => s.trim()).includes(etag))) {
+            c.setHeader('etag', etag)
+            if (self.cacheControl) {
+              c.setHeader('cache-control', self.cacheControl)
+            }
+            return c.status(304).to('')
+          }
+
+          c.setHeader('content-type', r.type)
+          c.setHeader('content-length', r.data.length)
+          c.setHeader('etag', etag)
+
+          if (r.gzip) {
+            c.setHeader('content-encoding', 'gzip')
+          }
+
+          if (self.cacheControl) {
+            c.setHeader('cache-control', self.cacheControl)
+          }
+
+          return c.to(r.data)
+        }
       }
 
       let data = null
@@ -321,15 +350,42 @@ class Resource {
 
       let zipdata = null
 
+      // 内容摘要（sha1 小写 hex）：文本分支发送前计算并带 ETag；二进制分支响应已流式发出，缓存命中后带
+      let hash = null
+
       try {
-        if (ctype.indexOf('text/') === 0
+        let fst = await fsp.stat(pathfile)
+
+        // 超限文件统一走流式，不缓存不压缩（无论文本/二进制）
+        if (fst.size > self.maxFileSize) {
+          self.cacheControl && c.setHeader('cache-control', self.cacheControl)
+          c.setHeader('content-type', ctype)
+            .setHeader('content-length', fst.size)
+            .sendHeader()
+
+          return await c.pipe(pathfile)
+        } else if (ctype.indexOf('text/') === 0
             || extname === '.json'
             || ctype.indexOf('font/') === 0)
         {
           data = await fsp.readFile(pathfile)
 
+          // 内容摘要：基于原文计算，发送前带上 ETag（数据在手，顺带计算）
+          hash = crypto.createHash('sha1').update(data).digest('hex')
+
+          // 缓存未命中但客户端带 If-None-Match：内容未变则 304，避免重发全量
+          let etag = `"${fst.size}-${hash}"`
+          let inm = c.headers['if-none-match']
+          if (inm && (inm === '*' || inm.split(',').map(s => s.trim()).includes(etag))) {
+            c.setHeader('etag', etag)
+            if (self.cacheControl) {
+              c.setHeader('cache-control', self.cacheControl)
+            }
+            return c.status(304).to('')
+          }
+
           //若文件很小，压缩后的数据很可能要比源文件还大，所以对超过1k的文件进行压缩，否则不进行压缩。
-          if (data && data.length > 1024) {
+          if (fst.size > 1024) {
               zipdata = await new Promise((rv, rj) => {
                   zlib.gzip(data, (err, d) => {
                     if (err) {
@@ -345,6 +401,7 @@ class Resource {
 
           c.setHeader('content-type', ctype)
             .setHeader('content-length', zipdata ? zipdata.length : data.length)
+            .setHeader('etag', etag)
 
           if (zipdata) {
             c.setHeader('content-encoding', 'gzip')
@@ -354,33 +411,42 @@ class Resource {
 
           c.sendHeader().to(zipdata || data)
         } else {
-          let fst = await fsp.stat(pathfile)
-
           c.setHeader('content-type', ctype).setHeader('content-length', fst.size);
 
           self.cacheControl && c.setHeader('cache-control', self.cacheControl);
 
           data = await this.pipeData(pathfile, c, fst.size)
           //说明数据太大，放弃了缓存
-          if (!data) return;
+          if (!data) return
         }
 
         if (self.cacheFailed >= self.failedLimit) {
           //以{self.prob}%概率决定是否释放缓存。
           if (((Math.random() * 100) | 0) < self.prob) {
             self.clearCache()
+            self.cacheFailed = 0
+          } else {
+            self.cacheFailed--
           }
-
         } else if (self.maxCacheSize > 0 && self.size >= self.maxCacheSize) {
 
           if (self.cacheFailed < 1000_0000)
             self.cacheFailed++
 
         } else {
+          // 内容摘要：文本分支已提前计算；二进制分支（响应已流式发出）在此补算
+          if (hash === null) {
+            hash = crypto.createHash('sha1').update(data).digest('hex')
+          }
+
           self.cache.set(real_path, {
             data : zipdata || data,
             type : ctype,
             gzip : zipdata ? true : false,
+            size : fst.size,        // 本地变更检测：大小
+            mtime : fst.mtimeMs,    // 本地变更检测：修改时间
+            hash : hash,            // 前端 ETag：内容摘要
+            checkTime : Date.now(), // 最近 stat 校验时间
           })
 
           self.size += zipdata ? zipdata.length : data.length
@@ -388,7 +454,7 @@ class Resource {
       } catch (err) {
         c.status(404).to('read file failed')
       }
-  
+
     }
 
   }

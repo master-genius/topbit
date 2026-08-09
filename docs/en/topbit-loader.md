@@ -8,7 +8,7 @@ TopbitLoader is the official recommended auto-loading extension for the Topbit f
 
 It implements a true MCM pattern (Middleware → Controller → Model) — lightweight, ultra-fast, and perfectly aligned with Topbit’s extreme-performance philosophy.
 
-**One sentence summary:**  
+**One sentence summary:**
 > Write your project following the conventional directory structure, then just call `new Loader().init(app)` once — all routes, middlewares, and models are automatically loaded.
 
 ---
@@ -25,16 +25,21 @@ project/
 │   │   ├── __mid.js        # Middleware only for admin group
 │   │   └── index.js        # → /admin
 │   └── api/
-│       ├── __mid.js
+│       ├── __mid.js        # api group middleware, inherited by subdirectories
 │       └── v1/
+│           ├── __mid.js    # v1 group middleware (optional)
 │           └── post.js     # → /api/v1/post
-├── middleware/            # Class-style middlewares (required)
-│   ├── @auth.js            # Must start with @
-│   ├── @cors.js
+├── middleware/            # Middlewares (required)
+│   ├── auth.js            # Class-style middleware (referenced as '@auth' in descriptors)
+│   ├── cors.js
 │   └── rate-limit.js       # Plain function middleware (less common)
 └── model/                  # Models (optional)
     └── user.js
 ```
+
+**Directory nesting**: Subdirectories may be nested up to **two levels** (e.g. `api/v1/`). Directory depth maps to route depth.
+
+**Middleware inheritance**: A directory-level `__mid.js` is automatically **inherited by all of its subdirectories and files** (subdirectories without their own `__mid.js` still inherit the parent's). Execution follows the onion model — middleware added first runs first (outermost); global middleware is outermost, deeper directories sit closer to the business handler.
 
 ---
 
@@ -70,6 +75,8 @@ app.autoWorker(16)
 
 Run `node app.js` → full-featured service is up!
 
+> **Re-entrancy guard**: A Loader instance loads only once — repeated `init()` calls are blocked with a warning. To serve multiple route sets on the same app, create multiple Loader instances with different `prePath`; they do not interfere with each other.
+
 ---
 
 ### 4. Configuration Options
@@ -80,22 +87,24 @@ Run `node app.js` → full-featured service is up!
 | `controllerPath`     | string             | `./controller`| Controller folder                                                                               |
 | `midwarePath`        | string             | `./middleware`| Middleware class folder                                                                         |
 | `prePath`            | string             | `''`          | Global route prefix (e.g. `/api/v1`)                                                            |
-| `subgroup`           | string\|Array      | `null`        | Load only specified subdirectories (e.g. `['admin','api']`)                                     |
-| `fileAsGroup`        | boolean            | `true`        | Highly recommended – each controller file becomes its own route group (precise middleware)   |
-| `optionsRoute`       | boolean            | `true`        | Auto-add `OPTIONS /*` routes for CORS preflight                                                 |
-| `multi`              | boolean            | `false`       | Allow multiple `init()` calls (keep `false` in production)                                      |
+| `name`               | string             | `'loader'`    | Loader name, used as the key injected into `app.service` (set distinct names for parallel instances) |
+| `optionsRoute`       | boolean            | `true`        | Auto-add `OPTIONS /xxx/*` wildcard routes for CORS preflight; disable only if you handle OPTIONS yourself |
 | `homeFile`           | string             | `''`          | Which file serves the root `/` route (e.g. `'index.js'`)                                        |
 | `initArgs`           | any                | `app.service` | Arguments passed to every controller’s `init()` method                                          |
 | `beforeController`   | function           | `null`        | Hook executed after controller instantiation, before route registration                       |
 | `afterController`    | function           | `null`        | Hook executed after route registration                                                         |
 | `modelLoader`        | async function     | `null`        | Powerful extension point – custom model loading (recommended with topbit-model)               |
 
+**Fixed behavior**:
+
+- **File as group**: every controller file automatically becomes its own route group; directory-level middleware is mounted onto every file group under that directory (always on, no configuration needed).
+- **Idempotent `init()`**: repeated `init()` on the same instance is blocked; there is no built-in hot reload (use `nodemon` / `pm2 --watch` for file-change restarts during development).
+
 **Most common production config:**
 
 ```js
 new Loader({
   prePath: '/api/v1',
-  fileAsGroup: true,
   optionsRoute: true,
   modelLoader: async (service) => {
     const UserModel = require('./model/user')
@@ -134,12 +143,14 @@ class User {
 module.exports = User
 ```
 
-#### 5.2 Custom Path Parameters
+#### 5.2 Custom Path Parameters (instance properties)
+
+> Note: `param` / `postParam` are **instance properties**, not `static`.
 
 ```js
 class User {
-  static param = '/:uid/profile'     // overrides default /:id
-  static postParam = '/register'     // POST /user/register
+  param = '/:uid/profile'     // overrides default /:id
+  postParam = '/register'     // POST /user/register
 
   async post(c) {
     c.ok('registered')
@@ -149,12 +160,14 @@ class User {
 
 #### 5.3 File-Specific Middleware
 
+> Note: `__mid()` is an **instance method** (not `static`) returning an array of middleware descriptor objects.
+
 ```js
 class User {
-  static __mid() {
+  __mid() {
     return [
-      [require('../middleware/@auth'), { pre: true }],
-      require('../middleware/rate-limit')
+      { name: '@auth', pre: true },
+      { name: 'rate-limit' }
     ]
   }
 }
@@ -179,10 +192,12 @@ new Loader({ homeFile: 'index.js' }).init(app)
 
 ### 6. Middleware Writing Guide
 
-#### 6.1 Class-Style Middleware (Recommended – file name starts with `@`)
+#### 6.1 Class-Style Middleware (Recommended)
+
+The class middleware **file name has no `@` prefix** — `@` is a class-style marker used when referencing it inside middleware descriptor objects (`__mid.js` / `__mid()`):
 
 ```js
-// middleware/@auth.js
+// middleware/auth.js
 class Auth {
   async middleware(c, next) {
     if (!c.headers.token) return c.status(401).to('Token required')
@@ -191,6 +206,10 @@ class Auth {
   }
 }
 module.exports = Auth
+
+// Referenced inside controller/__mid.js:
+// { name: '@auth' }         → class-style: require middleware/auth.js, instantiate, call its middleware/mid method
+// { name: 'rate-limit' }    → plain function: require middleware/rate-limit.js and use directly
 ```
 
 #### 6.2 Global / Group Middleware via `__mid.js`
@@ -199,23 +218,35 @@ module.exports = Auth
 // controller/__mid.js   (global)  or  controller/admin/__mid.js (group)
 module.exports = [
   { name: '@auth' },                                     // class middleware
-  { name: 'rate-limit', method: ['GET','POST'] },        // plain function
-  { middleware: async (c, next) => {                     // inline
+  { name: 'rate-limit', method: ['GET', 'POST'] },       // plain function, method-restricted
+  { middleware: async (c, next) => {                     // inline function
       console.log('global mid')
       await next(c)
-  }, pre: true }
+  }, pre: true }                                         // pre: runs before reading the request body
 ]
 ```
+
+**Middleware descriptor fields**:
+
+| Field       | Description                                                                          |
+|-------------|--------------------------------------------------------------------------------------|
+| `name`      | Middleware file name (`@` prefix in the descriptor = class-style, otherwise plain function) |
+| `middleware`| Inline `async` function (alternative to `name`)                                      |
+| `args`      | Constructor arguments for class-style middleware (when `name` starts with `@`)       |
+| `method`    | String or array restricting HTTP methods, e.g. `'POST'` / `['GET','POST']`           |
+| `pre`       | `true` → runs as a pre-middleware, before the request body is read                   |
+| `mode`      | `'test'/'dev'/'online'/'product'` — filter by environment (combined with `service.TEST`/`service.DEV`) |
+| `handler`   | File-level middleware only; restricts target controller methods, e.g. `['get', 'list']` |
 
 #### 6.3 File-Level Middleware (Most Precise)
 
 ```js
-// Inside any controller file
+// Inside any controller file, declared via the instance method __mid()
 __mid() {
   return [
     { name: '@vip-auth', pre: true },
     { name: 'log', method: 'POST' },
-    //use for controller method: get list
+    // applies only to the controller methods: get, list
     { name: 'check', handler: ['get', 'list'] }
   ]
 }
@@ -243,14 +274,16 @@ new Loader({
 })
 ```
 
+The `service` passed to `modelLoader` is `app.service`; injected models are usable inside controllers via `c.service.xxxModel`.
+
 ---
 
 ### 8. Naming & Safety Rules
 
-- Folder and file names may only contain: `a-z 0-9 _ -` and must start with a letter  
-- No spaces, Chinese characters, uppercase letters, or special symbols  
-- Files/folders starting with `!` are automatically ignored  
-- Violation → red warning + skip loading  
+- Folder and file names may contain: `a-z 0-9 _ -` (both upper and lower case letters are allowed; lowercase is recommended)
+- No spaces, Chinese characters, or special symbols
+- Files/folders starting with `!` are automatically ignored (useful for temporarily disabling)
+- Names that violate the rules are skipped with a red warning
 
 ---
 
@@ -258,10 +291,10 @@ new Loader({
 
 | Need                            | Solution                                                                                              |
 |---------------------------------|-------------------------------------------------------------------------------------------------------|
-| Multiple API versions coexist   | Use different `prePath` and create multiple Loader instances                                         |
-| Canary / gray release           | `subgroup: ['v2']` + Nginx traffic split                                                             |
+| Multiple API versions coexist   | Create multiple Loader instances with `prePath: '/v1'`, `prePath: '/v2'` (optionally with distinct `name`) |
+| Temporarily disable a controller / directory | Prefix the file or folder name with `!`, e.g. `!old-user.js`                                  |
 | Plugin system                   | Each plugin has its own folder → `new Loader({ appPath: './plugins/xxx' }).init(app)`                |
-| Hot reload (dev)                | Set `multi: true` + watch files with chokidar and re-call `init()`                                   |
+| Dev hot reload                  | Use `nodemon` or `pm2 --watch` to restart on file changes (the loader itself does not support repeated `init()`) |
 
 ---
 
@@ -290,7 +323,6 @@ const app = new Topbit({
 if (app.isWorker) {
   new Loader({
     prePath: '/api',
-    fileAsGroup: true,
     optionsRoute: true,
     modelLoader: async (svc) => {
       svc.db    = require('./lib/mysql-pool')
@@ -308,7 +340,7 @@ app.daemon(443, 8)
 
 **You have now mastered the complete essence of TopbitLoader!**
 
-Start using it today and you’ll find:  
+Start using it today and you’ll find:
 > Topbit + TopbitLoader = possibly the best developer experience + highest performance backend combination in the current Node.js ecosystem.
 
 Happy coding and may your services fly!

@@ -63,13 +63,22 @@ class Http2Pool {
       session: session,
       connected: false,
       aliveStreams: 0, // 当前并发数
+      // 本连接并发上限：初始为配置值，收到对端 SETTINGS 后收敛为 min(配置, 对端声明)
+      streamLimit: this.maxAliveStreams,
       weight: 1        // 预留权重字段
     }
+
+    // 对端通过 SETTINGS_MAX_CONCURRENT_STREAMS 声明并发上限，动态收敛本连接配额
+    session.on('remoteSettings', (settings) => {
+      if (settings.maxConcurrentStreams !== undefined) {
+        wrapper.streamLimit = Math.min(this.maxAliveStreams, settings.maxConcurrentStreams)
+      }
+    })
 
     session.once('connect', () => {
       wrapper.connected = true
       // 触发队列中的等待者
-      while (this.waitQueue.length > 0 && wrapper.aliveStreams < this.maxAliveStreams) {
+      while (this.waitQueue.length > 0 && wrapper.aliveStreams < wrapper.streamLimit) {
         const resolve = this.waitQueue.shift()
         resolve(wrapper)
       }
@@ -130,7 +139,7 @@ class Http2Pool {
         this.cursor = (this.cursor + 1) % len
         const wrapper = this.sessions[this.cursor]
 
-        if (wrapper && wrapper.connected && !wrapper.session.destroyed && wrapper.aliveStreams < this.maxAliveStreams) {
+        if (wrapper && wrapper.connected && !wrapper.session.destroyed && wrapper.aliveStreams < wrapper.streamLimit) {
             return wrapper
         }
         tried++

@@ -29,7 +29,8 @@ const optionsCheck = require('./optionsCheck.js');
 const Context1 = require('./context1.js');
 const Context2 = require('./context2.js');
 const ext = require('./ext.js');
-const TopbitLoader = require('./loader/loader.js')
+const TopbitLoader1 = require('./loader/loader.js')
+const TopbitLoader = require('./loader/loadernext.js')
 const TopbitToken = require('./token/token.js')
 const TopbitExtends = require('./_loadExtends.js')
 const npargv = require('./lib/npargv.js')
@@ -1334,7 +1335,8 @@ class Topbit {
 
 }
 
-Topbit.Loader = TopbitLoader;
+Topbit.ClassicLoader = TopbitLoader1;
+Topbit.TopbitLoader = Topbit.Loader = TopbitLoader;
 Topbit.Token = TopbitToken;
 Topbit.npargv = npargv;
 Topbit.zipdata = zipdata;

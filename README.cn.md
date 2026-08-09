@@ -2175,7 +2175,7 @@ let ret = parseArgv({
     type: 'int',
     min: 1,
     max: 4,
-    //若设置了默认值，则在参数不合法时会自动使用默认值不会返回错误信息。
+    //默认值仅在未传递该参数时生效；传递了但不合法则按 strict 模式处理（默认返回错误）。
     default: 2
   },
 
@@ -2221,29 +2221,36 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 ```javascript
 {
   ok: true,
-  errmsg: '',
+  message: '',
+  errors: [],
   args: {
+    port: 2010,
+    host: '1.2.3.4',
     worker: 2,
     https: true,
     http2: true,
     test: true,
-    limit: false,
-    host: '1.2.3.4',
-    port: 2010,
     id: [ '1', '2', '3', '4', '5' ],
-    '--local': true,
+    limit: false,
     '-x': false
   },
-  // 不是参数，也不是-开头的会放在list中，方便获取。
-  // 如果存在位置引用的参数，则会优先解析，所以x没有在list中。
-  list: ['a', 'b', 'c']
+  // 不是参数、也不以 - 开头的普通参数（如文件名）会放入 list 中。
+  list: ['x', 'a', 'b', 'c'],
+  command: null
 }
 
 ```
 
-解析后的结果，若ok为false，则errmsg会给出错误提示信息。若参数无错误，则args是解析后的参数对象。
+解析后的返回结构：
 
-解析过程中，若参数不在传递的对象描述信息内，仍然会在args中体现，key值即为参数的名字，可以参考示例中的--local。
+- `ok`：是否全部参数合法。
+- `message`：第一个错误信息（无错误时为空字符串）。
+- `errors`：全部错误信息数组（配合 strict:false 收集所有错误）。
+- `args`：解析后的参数对象（key 为 name 或参数名）。
+- `list`：不是参数、也不以 - 开头的普通参数（如文件名）。
+- `command`：解析出的子命令（未启用子命令时为 null）。
+
+解析过程中，**未在描述中定义的参数（以 - 开头）会被忽略**，不会出现在 args 中（如示例中的 --local）。
 
 如果对参数的描述信息不是object类型，则会转换为boolean类型，此时name值即为参数的名字。参考-x参数。
 
@@ -2257,7 +2264,7 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 
 - 否则，若描述对象含有min或max则为int类型。
 
-- 否则，若描述对象具备default，则如果default是数字或字符串类型，type和default类型一致。
+- 否则，若描述对象具备default，则type与default的类型一致（数字→number、布尔→boolean、其他→string）。
 
 - 否则，type为bool。
 
@@ -2279,13 +2286,13 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 | name | 否 | 解析后参数的名字，就是解析后参数对象的key值。若不给定则使用参数名称。 |
 | min | 否 | 限制最小值。 |
 | max | 否 | 限制最大值。 |
-| default | 否 | 默认值，若设置，则检测到传递的参数不合法，会采用默认值不会返回错误信息。对于bool来说，default无效。默认值为false。 |
+| default | 否 | 默认值。仅当参数**未传递**时生效；参数已传递但不合法时，strict 模式（默认）返回错误，strict:false 时保留默认值并把错误加入 errors。对 bool 同样有效（如 default:true）。 |
 | match | 否 | 正则表达式，若给定，会进行正则匹配。 |
 | callback | 否 | 函数，若给定，会把参数值传递到函数，若函数返回值不是undefined，则作为最后解析的值。 |
 
 ### autoDefault自动设定默认值
 
-在程序解析过程中，有时候需要必须返回参数，不合法则使用默认值，这需要对每个选项都使用default属性，或者使用\@autoDefault让npargv自动设定默认值。
+在程序解析过程中，有时候需要必须返回参数，不合法则使用默认值，这需要对每个选项都使用default属性，或者开启autoDefault让npargv自动设定默认值。**autoDefault 是第二个参数 options 的配置项，默认即为 true**（直接放在 schema 里的 `@autoDefault` 键无效）。
 
 ```javascript
 'use strict'
@@ -2294,9 +2301,6 @@ const Topbit = require('Topbit')
 const parseArgv = Topbit.npargv
 
 let opts = {
-  //启用自动设定默认值。
-  '@autoDefault' : true,
-
   //没有设定默认值，会自动设定默认值为min的值。
   '--port' : {
     min: 1234,
@@ -2307,11 +2311,10 @@ let opts = {
   '-x' : {
     type : 'int'
   }
-
-
 }
 
-let {args} = parseArgv(opts)
+//第二个参数 options：{ strict, autoDefault, commands, defaultCommand, argv }
+let {args} = parseArgv(opts, { autoDefault: true })
 
 ```
 
@@ -2325,20 +2328,28 @@ let {args} = parseArgv(opts)
 
 ### 第一个参数作为子命令
 
+子命令通过**第二个参数 options** 定义（直接放在 schema 里的 `@command`/`@defaultCommand` 键无效）：
+
 ```javascript
 
-let argscfg = {
+// 第一个参数是 schema，第二个参数是 options
+parseArgv(schema, {
     //定义支持的子命令
-    '@command' : [
+    commands: [
         'create', 'show', 'update', 'delete'
     ],
 
-    //当不输入时，默认的命令
-    '@defaultCommand': 'show'
-}
-
+    //当不输入子命令时，默认使用的命令
+    defaultCommand: 'show'
+})
 
 ```
+
+子命令规则：
+
+- 若未输入子命令、或第一个参数就是 `-` 开头，则使用 defaultCommand（若已设置）。
+- 若输入了不在列表中的命令：设置了 defaultCommand 时回退到默认命令，否则报错。
+- 错误处理遵循 strict 模式：strict（默认）立即返回错误；strict:false 时错误收集到 errors 并继续解析。
 
 ### 位置引用参数
 
@@ -2350,16 +2361,15 @@ let argscfg = {
 
 - 索引位置是参数值，不会包括命令名称。
 
-- 如果设定了@command，则位置1会自动在解析时从command后开始。
+- 如果启用了子命令（options.commands），则位置1会自动在解析时从子命令后开始。
 
-注意：@command表示的是第一个参数，用于脚本的子命令功能。
+注意：子命令是解析时的第一个参数，用于脚本的子命令功能。
 
 ```javascript
 const Topbit = require('Topbit')
 const npargv = Topbit.npargv
 
 let {args} = npargv({
-    '@autoDefault': true,
     '$1': {
         type: 'string',
     },
@@ -2369,7 +2379,7 @@ let {args} = npargv({
             return ['i', 'o', 'v'].indexOf(v) >= 0 ? v : 'o'
         }
     }
-})
+}, { autoDefault: true })
 
 ```
 

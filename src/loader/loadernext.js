@@ -11,7 +11,7 @@ let outWarning = (text, errname = 'Warning', color = '\x1b[2;31;47m') => {
 
 let nameErrorInfo = '名称不能有空格换行特殊字符等，仅支持 字母 数字 减号 下划线，字母开头。';
 
-class TopbitLoader1 {
+class TopbitLoader {
 
   constructor(options = {}) {
     let appDir = '.';
@@ -19,6 +19,7 @@ class TopbitLoader1 {
     this.globalMidTable = [];
     this.groupMidTable = Object.create(null);
     this.fileMidTable = Object.create(null);
+    this.parentGroupMap = Object.create(null);
 
     if (typeof options !== 'object') {
       options = {};
@@ -40,22 +41,18 @@ class TopbitLoader1 {
     }
 
     this.config = {
+      name: 'loader',
       appPath     : appDir,
       controllerPath  : appDir + '/controller',
       midwarePath   : appDir + '/middleware',
 
-      deep : 1,
-      // 如果作为数组则会去加载指定的子目录
-      subgroup : null,
       prePath: '',
       homeFile: '',
       
       // 控制器初始化参数，默认为 app.service
       initArgs: null,
 
-      multi: false,
       optionsRoute: true,
-      fileAsGroup: true,
 
       beforeController: null,
       afterController: null,
@@ -64,7 +61,7 @@ class TopbitLoader1 {
       modelLoader: null
     };
 
-    // 用于在fileAsGroup模式，为options添加的分组避免和文件的分组冲突。
+    // 目录 OPTIONS 通配路由的分组前缀，避免与文件分组名冲突。
     this.groupTag = '@';
 
     // 组中间件的缓存
@@ -73,17 +70,12 @@ class TopbitLoader1 {
 
     this.routepreg = /^[a-z\d\-\_]+$/i;
 
+    this.__loaded__ = false;
+
     for (let k in options) {
       if (k == 'appPath') continue;
 
-      if (k === 'subgroup') {
-        if (typeof options[k] === 'string') options[k] = [ options[k] ];
-        if (options[k] instanceof Array) {
-          this.config.subgroup = options[k];
-        }
-        this._fmtSubGroup();
-        continue;
-      } else if ( (k === 'prePath' || k === 'prepath') && typeof options[k] === 'string') {
+      if ( (k === 'prePath' || k === 'prepath') && typeof options[k] === 'string') {
         this.config.prePath = options[k];
         this.fmtPrePath();
         continue;
@@ -104,9 +96,7 @@ class TopbitLoader1 {
           ;(typeof options[k] === 'string') && (this.config[k] = options[k]);
           break;
 
-        case 'multi':
         case 'optionsRoute':
-        case 'fileAsGroup':
           this.config[k] = !!options[k];
           break;
 
@@ -114,6 +104,11 @@ class TopbitLoader1 {
         case 'midwarePath':
           if (options[k][0] !== '/') {
             this.config[k] = `${this.config.appPath}/${options[k]}`;
+          }
+          break;
+        case 'name':
+          if (typeof options[k] === 'string' && options[k].trim() !== '') {
+            this.config[k] = options[k].trim();
           }
           break;
 
@@ -149,28 +144,28 @@ class TopbitLoader1 {
     this.config.prePath = prepath;
   }
 
-  _fmtSubGroup() {
-    if (!(this.config.subgroup instanceof Array)) return;
-    let a;
-    for (let i = 0; i < this.config.subgroup.length; i++) {
-      a = this.config.subgroup[i];
-      a = a.trim().replace(/\/+/g, '');
-      this.config.subgroup[i] = a;
-    }
-  }
-
   async _coreinit(app) {
+    if (this.__loaded__) return;
     // 注入应用基础信息到 service，供 Controller 或 Model 使用
-    Object.defineProperties(app.service, {
-      __prepath__: {
-        value: this.config.prePath,
-        configurable: false, writable: false, enumerable: false
-      },
-      __appdir__: {
-        value: this.config.appPath,
-        configurable: false, writable: false, enumerable: false
-      }
-    });
+    if (!app.service[this.config.name]) {
+      app.service[this.config.name] = {
+        name: this.config.name,
+        prepath: this.config.prePath,
+      };
+    }
+
+    if (Object.getOwnPropertyDescriptor(app.service, '__prepath__') === undefined) {
+      Object.defineProperties(app.service, {
+        __prepath__: {
+          value: this.config.prePath,
+          configurable: false, writable: false, enumerable: false
+        },
+        __appdir__: {
+          value: this.config.appPath,
+          configurable: false, writable: false, enumerable: false
+        }
+      });
+    }
 
     // 1. 执行模型加载钩子 (如果存在)
     if (this.config.modelLoader) {
@@ -183,7 +178,7 @@ class TopbitLoader1 {
     // 3. 加载中间件
     this.loadMidware(app);
     
-    app.service.__topbit_loader__ = true;
+    this.__loaded__ = true;
   }
 
   /**
@@ -207,9 +202,8 @@ class TopbitLoader1 {
   }
 
   loadController(app) {
-    if (app.service.__topbit_loader__ && !this.config.multi) {
+    if (this.__loaded__) {
       outWarning('您已经使用topbit-loader加载过路由，多次加载容易导致路由冲突，重复操作将会被终止。');
-      outWarning('若有需要，可设置选项multi为true允许多次加载。', '  提示');
       return false;
     }
 
@@ -278,9 +272,7 @@ class TopbitLoader1 {
       cob.mode = 'restful';
     }
 
-    let group = cf.dirgroup;
-    
-    if (this.config.fileAsGroup) group = cf.filegroup;
+    let group = cf.filegroup;
 
     let npre = cf.filegroup;
     let prepath = this.config.prePath;
@@ -289,7 +281,7 @@ class TopbitLoader1 {
 
     npre = `${prepath}${npre}`;
     group = `${prepath}${group}`;
-    //用于在fileAsGroup模式添加options路由。
+    // 目录级 dirgroup，用于 OPTIONS 通配路由。
     let dirgroup = `${prepath}${cf.dirgroup}`;
 
     let routeParam = '/:id';
@@ -359,8 +351,8 @@ class TopbitLoader1 {
     if (cob.options && typeof cob.options === 'function') {
         bindRoute('options', routeParam, 'options', this.methodNumber.options);
     } else if (this.config.optionsRoute) {
-      let real_group = this.config.fileAsGroup ? dirgroup : group;
-      let tag = this.config.fileAsGroup ? this.groupTag : '';
+      let real_group = dirgroup;
+      let tag = this.groupTag;
 
       if (real_group === `${this.config.prePath}/`) {
         this._autoAddOptions(app, `${route_path}/*`, tag + real_group);
@@ -390,7 +382,6 @@ class TopbitLoader1 {
   }
 
   _getGroupList() {
-    this.groupList = [`${this.config.prePath}/`];
     this.orgGroupList = ['/'];
 
     try {
@@ -399,8 +390,15 @@ class TopbitLoader1 {
         if (!f.isDirectory()) continue;
         if (f.name[0] === '!' || f.name[0] === '.') continue;
 
-        this.groupList.push(`${this.config.prePath}/${f.name}`);
         this.orgGroupList.push(`/${f.name}`);
+        let subdir = `${this.config.controllerPath}/${f.name}`;
+        let sublist = fs.readdirSync(subdir, {withFileTypes: true});
+        for (let sf of sublist) {
+          if (!sf.isDirectory()) continue;
+          if (sf.name[0] === '!' || sf.name[0] === '.') continue;
+
+          this.orgGroupList.push(`/${f.name}/${sf.name}`);
+        }
       }
     } catch (err) {
       console.error('获取全局所有分组失败，若获取失败会导致程序运行错误，故进程退出，请检查错误。');
@@ -408,28 +406,38 @@ class TopbitLoader1 {
       process.exit(1);
     }
 
-    return this.groupList;
+    return this.orgGroupList;
   }
 
   /**
    * 加载中间件
    */
   loadMidware(app) {
-    if (app.service.__topbit_loader__ && !this.config.multi) return;
+    if (this.__loaded__) return;
 
     this._getGroupList();
 
     for (let i = 0; i < this.globalMidTable.length; i++) {
       this.loadGlobalMidware(app, this.globalMidTable[i]);
     }
+
     //加载组，此时组已经确定
+
+    for (let k in this.parentGroupMap) {
+      let parent_group = this.parentGroupMap[k];
+      if (parent_group && this.groupMidTable[parent_group] ) {
+        let parent_mids = this.groupMidTable[parent_group];
+        this.groupMidTable[k] = [...parent_mids, ...(this.groupMidTable[k]||[])];
+      }
+    }
+
     for (let k in this.groupMidTable) {
       for (let i=0; i < this.groupMidTable[k].length; i++) {
         this.loadGroupMidware(app, this.groupMidTable[k][i], k);
       }
     }
     
-    if (this.config.fileAsGroup && this.config.optionsRoute) {
+    if (this.config.optionsRoute) {
       for (let g of this.orgGroupList) {
         this._loadMidForFileAsGroup(app, `${this.groupTag}${this.config.prePath}${g}`, g);
       }
@@ -454,21 +462,19 @@ class TopbitLoader1 {
 
   _loadMidForFileAsGroup(app, group, dirgroup) {
     //此时文件作为分组，从groupCache中取出中间件，并添加到分组。
-    if (this.config.fileAsGroup) {
-      let tmp_opts;
-      for (let g of this.globalCache) {
+    let tmp_opts;
+    for (let g of this.globalCache) {
+      tmp_opts = {...g[1]};
+      tmp_opts.group = group;
+      app.use(g[0], tmp_opts);
+    }
+
+    let ggp = this.groupCache[dirgroup];
+    if (ggp && Array.isArray(ggp)) {
+      for (let g of ggp) {
         tmp_opts = {...g[1]};
         tmp_opts.group = group;
         app.use(g[0], tmp_opts);
-      }
-
-      let ggp = this.groupCache[dirgroup];
-      if (ggp && Array.isArray(ggp)) {
-        for (let g of ggp) {
-          tmp_opts = {...g[1]};
-          tmp_opts.group = group;
-          app.use(g[0], tmp_opts);
-        }
       }
     }
   }
@@ -531,29 +537,17 @@ class TopbitLoader1 {
 
   loadGlobalMidware(app, m) {
     if (this._checkMidwareMode(app, m) === false) return;
-    
-    let makeOpts = (groupname = null) => {
+
+    let makeOpts = () => {
       let op = {};
       if (m.method !== undefined) op.method = m.method;
-      if (groupname) op.group = groupname[0] === '/' ? groupname : `/${groupname}`;
       if (m.pre) op.pre = true;
       return op;
     };
 
-    let mobj;
-    let group = this.groupList;
-
-    if (group) {
-      mobj = this.getMidwareInstance(m);
-      if (this.config.fileAsGroup) {
-        mobj && this.globalCache.push([mobj, makeOpts()]);
-        return;
-      }
-
-      for (let g of group) {
-        mobj && app.use(mobj, makeOpts(g));
-      }
-      return;
+    let mobj = this.getMidwareInstance(m);
+    if (mobj) {
+      this.globalCache.push([mobj, makeOpts()]);
     }
   }
 
@@ -568,12 +562,8 @@ class TopbitLoader1 {
 
     let mobj = this.getMidwareInstance(m);
     if (mobj) {
-      if (!this.config.fileAsGroup) {
-        app.use(mobj, opts);
-      } else {
-        if (!this.groupCache[group]) { this.groupCache[group] = [[mobj, opts]]; }
-        else { this.groupCache[group].push([mobj, opts]); }
-      }
+      if (!this.groupCache[group]) { this.groupCache[group] = [[mobj, opts]]; }
+      else { this.groupCache[group].push([mobj, opts]); }
     }
   }
 
@@ -582,13 +572,6 @@ class TopbitLoader1 {
 
     let opts = { group };
     f = `${this.config.prePath}${f}`;
-
-    if (!this.config.fileAsGroup && m.handler === undefined) {
-      m.handler = [
-        'get', 'list', 'post', 'put', 'delete',
-        'options', 'patch', 'head', 'trace'
-      ];
-    }
 
     if (m.handler && typeof m.handler === 'string') m.handler = [ m.handler ];
 
@@ -615,19 +598,15 @@ class TopbitLoader1 {
   /**
    * 读取控制器目录中的文件
    */
-  readControllers(cdir, cfiles, deep = 0, dirgroup = '') {
+  readControllers(cdir, cfiles, deep=0, dirgroup='', parent_group='') {
     let files = fs.readdirSync(cdir, {withFileTypes:true});
 
     let tmp = '';
     for (let i = 0; i < files.length; i++) {
 
-      if (files[i].isDirectory() && deep < 1) {
+      if (files[i].isDirectory() && deep < 2) {
 
         if (files[i].name[0] == '!') continue;
-
-        if (this.config.subgroup instanceof Array) {
-            if (this.config.subgroup.indexOf(files[i].name) < 0) continue;
-        }
 
         if (this.routepreg.test(files[i].name) === false) {
           outWarning(`${files[i].name}/ ${nameErrorInfo}`, 'Error');
@@ -636,19 +615,14 @@ class TopbitLoader1 {
 
         this.readControllers(cdir+'/'+files[i].name, 
           cfiles, deep+1,
-          `${dirgroup}/${files[i].name}`
+          `${dirgroup}/${files[i].name}`,
+          dirgroup
         );
 
       } else if (files[i].isFile()) {
         if (files[i].name[0] === '!') continue;
         if (files[i].name.length < 4) continue;
         if (files[i].name.substring(files[i].name.length-3) !== '.js') continue;
-
-        if (this.config.subgroup instanceof Array && deep < 1) {
-          if (this.config.subgroup.indexOf('') < 0 && this.config.subgroup.indexOf('/') < 0) {
-            continue;
-          }
-        }
 
         if (files[i].name == '__mid.js') {
           if (deep == 0) {
@@ -673,10 +647,12 @@ class TopbitLoader1 {
           modname: tmp,
           pathname : `${dirgroup}${dirgroup ? '/' : ''}${files[i].name}`
         };
+
+        deep > 0 && (this.parentGroupMap[dirgroup] = parent_group);
       }
     }
   }
 
 }
 
-module.exports = TopbitLoader1;
+module.exports = TopbitLoader;

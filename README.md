@@ -2134,7 +2134,7 @@ let ret = parseArgv({
     type: 'int',
     min: 1,
     max: 4,
-    // If a default value is set, it will automatically use the default value instead of returning an error when the argument is invalid.
+    // The default applies only when the argument is absent; an invalid value follows strict mode (error by default).
     default: 2
   },
 
@@ -2179,28 +2179,35 @@ Output result:
 ```javascript
 {
   ok: true,
-  errmsg: '',
+  message: '',
+  errors: [],
   args: {
+    port: 2010,
+    host: '1.2.3.4',
     worker: 2,
     https: true,
     http2: true,
     test: true,
-    limit: false,
-    host: '1.2.3.4',
-    port: 2010,
     id: [ '1', '2', '3', '4', '5' ],
-    '--local': true,
+    limit: false,
     '-x': false
   },
-  // Items that are not arguments and do not start with - are placed in 'list' for easy access.
-  // If positional reference arguments exist, they are parsed first, so 'x' is not in the list here (assuming it was consumed).
-  list: ['a', 'b', 'c']
+  // Ordinary arguments that are not options and do not start with '-' go into 'list'.
+  list: ['x', 'a', 'b', 'c'],
+  command: null
 }
 ```
 
-In the parsed result, if `ok` is false, `errmsg` will provide the error message. If there are no errors, `args` is the parsed argument object.
+Returned structure:
 
-During parsing, if an argument is not in the passed object description, it will still appear in `args`, with the key being the argument name (see `--local` in the example).
+- `ok`: whether all arguments are valid.
+- `message`: the first error message (empty string when there are no errors).
+- `errors`: array of all error messages (used together with `strict: false`).
+- `args`: the parsed argument object (keys are `name` or the argument name).
+- `list`: ordinary arguments that are not options and do not start with `-` (e.g. file names).
+- `command`: the parsed subcommand (`null` when subcommands are not enabled).
+
+During parsing, **options not defined in the schema (starting with `-`) are ignored** and do not appear in `args` (e.g. `--local` in the example).
 
 If the description info for an argument is not an object, it converts to boolean type, using the argument name as `name`. See the `-x` parameter.
 
@@ -2211,7 +2218,7 @@ If the description info for an argument is not an object, it converts to boolean
 - If the argument contains `=`, e.g., `--port=`, the type is `string`.
 - Otherwise, if the description object has `match` or `callback`, it is `string` type.
 - Otherwise, if the description object contains `min` or `max`, it is `int` type.
-- Otherwise, if the description object has `default`, and `default` is a number or string, the type matches the `default` type.
+- Otherwise, if the description object has `default`, the `type` matches the `default` type (number → `number`, boolean → `boolean`, otherwise `string`).
 - Otherwise, the type is `bool`.
 
 **Supported types:**
@@ -2229,13 +2236,13 @@ If the description info for an argument is not an object, it converts to boolean
 | name | No | Name of the parsed argument (key in the parsed object). If not given, uses the argument name. |
 | min | No | Restricts minimum value. |
 | max | No | Restricts maximum value. |
-| default | No | Default value. If set, invalid arguments will default to this value without returning an error. `default` is invalid for bool types (defaults to false). |
+| default | No | Default value. Applies only when the argument is **absent**; an invalid value follows strict mode (error by default; with `strict: false` the default is kept and the error is collected in `errors`). Also works for `bool` (e.g. `default: true`). |
 | match | No | Regular expression. If given, regex matching is performed. |
 | callback | No | Function. If given, passes the argument value to the function. If the return value is not undefined, it is used as the final parsed value. |
 
 ### autoDefault (Automatic Default Values)
 
-Sometimes the program requires parameters to be returned, using default values if invalid. This usually requires setting the `default` property for every option, or using `@autoDefault` to let `npargv` set defaults automatically.
+Sometimes the program requires parameters to be returned, using default values if invalid. This usually requires setting the `default` property for every option, or enabling `autoDefault` to let `npargv` set defaults automatically. **`autoDefault` is an option of the second `options` parameter and defaults to `true`** (an `@autoDefault` key placed inside the schema is ignored).
 
 ```javascript
 'use strict'
@@ -2244,9 +2251,6 @@ const Topbit = require('Topbit')
 const parseArgv = Topbit.npargv
 
 let opts = {
-  // Enable automatic default setting.
-  '@autoDefault' : true,
-
   // No default set; automatically sets default to the value of min.
   '--port' : {
     min: 1234,
@@ -2259,7 +2263,8 @@ let opts = {
   }
 }
 
-let {args} = parseArgv(opts)
+// Second parameter options: { strict, autoDefault, commands, defaultCommand, argv }
+let {args} = parseArgv(opts, { autoDefault: true })
 ```
 
 Rules for automatic defaults:
@@ -2270,17 +2275,26 @@ Rules for automatic defaults:
 
 ### First Argument as Subcommand
 
+Subcommands are defined via the **second `options` parameter** (an `@command`/`@defaultCommand` key inside the schema is ignored):
+
 ```javascript
-let argscfg = {
+// First argument is the schema, second is options
+parseArgv(schema, {
     // Define supported subcommands
-    '@command' : [
+    commands: [
         'create', 'show', 'update', 'delete'
     ],
 
-    // Default command when none is entered
-    '@defaultCommand': 'show'
-}
+    // Default command used when none is entered
+    defaultCommand: 'show'
+})
 ```
+
+Subcommand rules:
+
+- If no subcommand is entered, or the first argument starts with `-`, `defaultCommand` is used (when set).
+- If a command outside the list is entered: falls back to `defaultCommand` when set, otherwise an error.
+- Error handling follows strict mode: strict (default) returns the error immediately; with `strict: false` errors are collected in `errors` and parsing continues.
 
 ### Positional Reference Arguments
 
@@ -2290,16 +2304,15 @@ However, the positional index differs from internal indexing:
 
 - Index starts at 1.
 - Index refers to argument values, excluding the command name.
-- If `@command` is set, position 1 automatically starts after the command.
+- If subcommands are enabled (`options.commands`), position 1 automatically starts after the subcommand.
 
-Note: `@command` represents the first argument, used for script subcommand functionality.
+Note: the subcommand is the first argument parsed, used for script subcommand functionality.
 
 ```javascript
 const Topbit = require('Topbit')
 const npargv = Topbit.npargv
 
 let {args} = npargv({
-    '@autoDefault': true,
     '$1': {
         type: 'string',
     },
@@ -2309,7 +2322,7 @@ let {args} = npargv({
             return ['i', 'o', 'v'].indexOf(v) >= 0 ? v : 'o'
         }
     }
-})
+}, { autoDefault: true })
 ```
 
 ---

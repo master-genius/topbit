@@ -87,6 +87,9 @@ class Proxy {
 
     this.timeout = 35000
 
+    // 代理传输总时长上限（毫秒），0 表示不限制；响应头到达后开始计时
+    this.requestTimeout = 600000
+
     this.addIP = false
 
     this.debug = false
@@ -174,6 +177,12 @@ class Proxy {
         case 'timeout':
           if (typeof options[k] === 'number' && options[k] >= 0) {
             this.timeout = options[k]
+          }
+          break
+
+        case 'requestTimeout':
+          if (typeof options[k] === 'number' && options[k] >= 0) {
+            this.requestTimeout = options[k]
           }
           break
 
@@ -311,6 +320,8 @@ class Proxy {
         backend_obj = {
           url: tmp.url,
           urlobj: tmp.urlobj,
+          // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
+          requestTimeout: tmp.requestTimeout,
           headers: {},
           resHeaders: null,
           resHeadersCallback: null,
@@ -599,6 +610,29 @@ class Proxy {
         })
 
         h.on('response', res => {
+          // ---- 代理传输总时长上限（毫秒）----
+          // 优先级：ctx.box > 代理配置项 > 全局默认
+          // undefined = 未设置，继续向下一级查找；0 = 显式不限制
+          let rt = 0
+          if (c.box && typeof c.box.requestTimeout === 'number') {
+            rt = c.box.requestTimeout
+          } else if (pr && typeof pr.requestTimeout === 'number') {
+            rt = pr.requestTimeout
+          } else if (typeof self.requestTimeout === 'number') {
+            rt = self.requestTimeout
+          }
+
+          if (rt > 0) {
+            let rtTimer = setTimeout(() => {
+              !res.destroyed && res.destroy()       // 断开后端响应流
+              !c.res.destroyed && c.res.destroy()   // 断开客户端连接
+            }, rt)
+            // 三条结束路径均清理，防 timer 泄漏
+            res.on('end',   () => clearTimeout(rtTimer))
+            res.on('error', () => clearTimeout(rtTimer))
+            h.on('close',   () => clearTimeout(rtTimer))
+          }
+
           c.status(res.statusCode)
 
           if (c.major === 2) {
@@ -631,8 +665,16 @@ class Proxy {
           }
 
           res.on('data', chunk => {
-            // 客户端已断开则不再写入，避免写入已关闭的流
-            c.res.writable && c.res.write(chunk)
+            // 客户端已断开：停止从后端抽数据，尽早释放后端连接
+            if (!c.res.writable) {
+              res.destroy()
+              return
+            }
+            // 背压：write 返回 false 时暂停后端流，等 drain 后恢复，与请求方向一致
+            if (!c.res.write(chunk)) {
+              res.pause()
+              c.res.once('drain', () => res.resume())
+            }
           })
 
           res.on('end', () => {

@@ -91,6 +91,9 @@ let Http2Proxy = function (options = {}) {
   this.timeout = 30000
   this.connectTimeout = 15000
 
+  // 代理传输总时长上限（毫秒），0 表示不限制；响应头到达后开始计时
+  this.requestTimeout = 600000
+
   this.maxAliveStreams = 100
 
   this.starPath = false
@@ -129,6 +132,7 @@ let Http2Proxy = function (options = {}) {
       case 'timeout':
       case 'connectTimeout':
       case 'maxAliveStreams':
+      case 'requestTimeout':
         if (typeof options[k] === 'number' && !isNaN(options[k])) {
           this[k] = options[k]
         }
@@ -243,6 +247,9 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
     backend_obj.connectTimeout = tmp.connectTimeout
   }
 
+  if (tmp.maxAliveStreams && typeof tmp.maxAliveStreams === 'number' && tmp.maxAliveStreams > 0)
+    backend_obj.maxAliveStreams = tmp.maxAliveStreams
+
 }
 
 Http2Proxy.prototype.setHostProxy = function (cfg) {
@@ -285,6 +292,8 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         timeout: this.timeout,
         connectTimeout: this.connectTimeout,
         maxAliveStreams: this.maxAliveStreams,
+        // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
+        requestTimeout: tmp.requestTimeout,
         alive: false,
         connectOptions: {
           timeout: this.timeout,
@@ -530,6 +539,27 @@ Http2Proxy.prototype.mid = function () {
         })
 
         stm.on('response', (headers, flags) => {
+          // ---- 代理传输总时长上限（毫秒）----
+          // 优先级：ctx.box > 代理配置项 > 全局默认
+          // undefined = 未设置，继续向下一级查找；0 = 显式不限制
+          let rt = 0
+          if (c.box && typeof c.box.requestTimeout === 'number') {
+            rt = c.box.requestTimeout
+          } else if (pr && typeof pr.requestTimeout === 'number') {
+            rt = pr.requestTimeout
+          } else if (typeof self.requestTimeout === 'number') {
+            rt = self.requestTimeout
+          }
+
+          if (rt > 0) {
+            let rtTimer = setTimeout(() => {
+              !stm.destroyed && stm.destroy()       // 断开后端 h2 流
+              !c.res.destroyed && c.res.destroy()   // 断开客户端（h2 伪流 / h1 原生 res）
+            }, rt)
+            // h2 流 close 是所有结束路径的终点，仅此处清理即可
+            stm.on('close', () => clearTimeout(rtTimer))
+          }
+
           if (c.res && c.res.writable) {
             if (c.res.respond) {
               // HTTP/2：合并配置的响应消息头后一次性发送
