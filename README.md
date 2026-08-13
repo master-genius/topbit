@@ -1777,6 +1777,14 @@ s.handle = (ctx) => {
 
 Reverse proxy for HTTP/1.1 protocol, supporting load balancing and Alive Check.
 
+**port option (optional):** Tell the proxy the listening port so it auto-appends the port to hostname keys in `config`; requests are then matched directly against the Host header without port parsing.
+- Default `''`; `0` and empty string mean no auto-appending (the config key must exactly match the Host header).
+- Can be a number or numeric string, range 1 ~ 65535.
+- Non-80/443 ports: bare hostname `'a.com'` is replaced with `'a.com:port'`; a config key already ending with `:port` is kept as-is.
+- 80/443 ports: regardless of whether the config key is bare `'a.com'` or suffixed `'a.com:443'`, both keys (`'a.com'` + `'a.com:443'`) are generated and share the same backend config, so Host headers with or without the port both match.
+- When port is empty but the config key ends with `:80`/`:443`, the corresponding bare key is also auto-generated and both share.
+- When both a bare key and a suffixed key are configured, the first one wins; the latter's backend config is appended to the same array.
+
 **Basic Proxy Configuration:**
 
 ```javascript
@@ -1810,6 +1818,8 @@ let hostcfg = {
 
 const pxy = new Proxy({
     timeout: 10000,
+    // Tell the listening port so hostname keys get the port appended
+    port: 1234,
     config: hostcfg
 })
 

@@ -1814,6 +1814,14 @@ s.handle = (ctx) => {
 
 针对 HTTP/1.1 协议的反向代理，支持负载均衡和存活检测 (Alive Check)。
 
+**port 选项（可选）：** 告知代理服务监听的端口号，自动为 config 中的 hostname key 拼接端口，运行时直接按请求 Host 头匹配，不再解析端口。
+- 默认 `''`，`0` 和空字符串表示不自动拼接，此时 config 的 key 必须与请求 Host 头完全一致。
+- 可以是数字或数字字符串，范围 1 ~ 65535。
+- 非 80/443 端口：裸 hostname `'a.com'` 自动替换为 `'a.com:端口号'`；config key 已以 `:端口号` 结尾则保留原样。
+- 80/443 端口：无论 config key 是裸 `'a.com'` 还是带端口 `'a.com:443'`，都生成双 key（`'a.com'` + `'a.com:443'`），共享同一份后端配置，客户端 Host 头带或不带端口均可命中。
+- port 为空但 config key 以 `:80`/`:443` 结尾时，也会自动补全对应的裸 key，两者共享。
+- 同时配置裸 key 与带端口 key 时，按先出现的为准，后者的后端配置追加到同一数组。
+
 **基本代理配置：**
 
 ```javascript
@@ -1847,6 +1855,8 @@ let hostcfg = {
 
 const pxy = new Proxy({
     timeout: 10000,
+    // 告知监听端口，config 的 hostname 自动拼接端口
+    port: 1234,
     config: hostcfg
 })
 

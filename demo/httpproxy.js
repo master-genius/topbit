@@ -35,6 +35,7 @@ if (args.agent) proxy_class = Proxy
 
 if (app.isWorker) {
   let pxy = new proxy_class({
+    port: 1234,
     config: {
       'w.com': [
         {

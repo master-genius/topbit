@@ -52,19 +52,6 @@ function fmtpath(path) {
   return `${path}*`
 }
 
-// 主机名提取 (IPv6 兼容优化版)
-function extractHostname(host) {
-  if (!host) return ''
-  if (host.charCodeAt(0) === 91) { // '[' IPv6
-      const end = host.indexOf(']')
-      return end > -1 ? host.substring(0, end + 1) : host
-  }
-  const idx = host.indexOf(':')
-  if (idx === -1) return host
-  if (host.indexOf(':', idx + 1) !== -1) return host // 裸 IPv6
-  return host.substring(0, idx)
-}
-
 let Http2Proxy = function (options = {}) {
 
   if (!(this instanceof Http2Proxy)) return Http2Proxy(options)
@@ -101,6 +88,9 @@ let Http2Proxy = function (options = {}) {
   this.addIP = false
 
   this.debug = false
+
+  // 初始化时告知的服务端口，用于自动拼接 hostProxy 的 key；'' 或 0 表示不拼接
+  this.port = ''
 
   this.config = {}
 
@@ -147,6 +137,25 @@ let Http2Proxy = function (options = {}) {
       case 'connectOptions':
         if (options[k] && typeof options[k] === 'object') {
           for (let a in options[k]) this.connectOptions[a] = options[k][a]
+        }
+        break
+
+      case 'port':
+        // '' 和 0 表示不拼接；其他必须为 1~65535
+        if (options[k] === '' || options[k] === 0 || options[k] === '0') {
+          this.port = ''
+        } else if (typeof options[k] === 'number'
+                    || (typeof options[k] === 'string' && /^\d+$/.test(options[k]))) {
+          let p = parseInt(options[k])
+          if (p > 0 && p <= 65535) {
+            this.port = p
+          } else {
+            console.error(`proxy port 超出范围: ${options[k]}`)
+            this.port = ''
+          }
+        } else {
+          console.error(`proxy port 必须是数字或数字字符串: ${options[k]}`)
+          this.port = ''
         }
         break
     }
@@ -261,6 +270,23 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
   let tmp_cfg
 
   for (let k in cfg) {
+
+    // 80/443 场景确保裸 + 带端口双 key 共享（key 裸则补带端口，key 带端口则补裸）；
+    // port 为空但 key 带 :80/:443 后缀也补裸；其他端口裸 key 替换为带端口
+    let keys = [k]
+    if (this.port === 80 || this.port === 443) {
+      let bareKey, portKey
+      if (k.endsWith(':80')) { bareKey = k.slice(0, -3); portKey = k }
+      else if (k.endsWith(':443')) { bareKey = k.slice(0, -4); portKey = k }
+      else { bareKey = k; portKey = `${k}:${this.port}` }
+      keys = [bareKey, portKey]
+    } else if (this.port !== '' && !k.endsWith(`:${this.port}`)) {
+      keys = [`${k}:${this.port}`]
+    } else if (this.port === '' && (k.endsWith(':80') || k.endsWith(':443'))) {
+      let bareKey = k.endsWith(':80') ? k.slice(0, -3) : k.slice(0, -4)
+      keys = [bareKey, k]
+    }
+
     tmp_cfg = Array.isArray(cfg[k]) ? cfg[k] : [ cfg[k] ]
 
     for (let i = 0; i < tmp_cfg.length; i++) {
@@ -268,9 +294,11 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
 
       if (!this.checkConfig(tmp, k)) continue
 
-      if (this.hostProxy[k] === undefined) {
-        this.hostProxy[k] = {}
-        this.proxyBalance[k] = {}
+      for (let hk of keys) {
+        if (this.hostProxy[hk] === undefined) {
+          this.hostProxy[hk] = {}
+          this.proxyBalance[hk] = {}
+        }
       }
 
       pt = fmtpath(tmp.path)
@@ -324,20 +352,29 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
 
       backend_obj.h2Pool.createPool()
 
-      if (this.hostProxy[k][pt] === undefined) {
-        
-        this.hostProxy[k][pt] = [ backend_obj ]
+      if (this.hostProxy[keys[0]][pt] === undefined) {
 
-        this.proxyBalance[k][pt] = {
+        this.hostProxy[keys[0]][pt] = [ backend_obj ]
+
+        this.proxyBalance[keys[0]][pt] = {
           stepIndex : 0,
           useWeight : false
         }
-        
-      } else if (this.hostProxy[k][pt] instanceof Array) {
-        this.hostProxy[k][pt].push(backend_obj)
+
+      } else if (this.hostProxy[keys[0]][pt] instanceof Array) {
+        this.hostProxy[keys[0]][pt].push(backend_obj)
       }
 
-      if (backend_obj.weight > 1) this.proxyBalance[k][pt].useWeight = true
+      // 双 key 共享同一数组与 balance（同引用），保证 alive 状态与权重步进一致
+      if (keys.length > 1) {
+        for (let hk of keys) {
+          if (hk === keys[0]) continue
+          this.hostProxy[hk][pt] = this.hostProxy[keys[0]][pt]
+          this.proxyBalance[hk][pt] = this.proxyBalance[keys[0]][pt]
+        }
+      }
+
+      if (backend_obj.weight > 1) this.proxyBalance[keys[0]][pt].useWeight = true
 
       this.pathTable[pt] = 1
 
@@ -387,7 +424,6 @@ Http2Proxy.prototype.getBackend = function (c, host) {
 }
 
 //把http1的消息头转换为http2支持的
-
 Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
   let http2_headers = {
     ':method': ctx.method,
@@ -428,8 +464,7 @@ Http2Proxy.prototype.mid = function () {
   timeoutError.code = 'ETIMEOUT'
 
   return async (c, next) => {
-
-    let host = extractHostname(c.host)
+    let host = c.host
 
     if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
       if (self.full) {

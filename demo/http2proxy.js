@@ -13,6 +13,7 @@ let app = new Topbit({
 
 if (app.isWorker) {
   let h2proxy = new Http2Proxy({
+    port: 1234,
     config: {
       'v.com': [
         {

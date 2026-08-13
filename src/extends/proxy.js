@@ -33,19 +33,6 @@ function cleanHeadersForHttp1(headers) {
   return h1Headers
 }
 
-// 主机名提取 (IPv6 兼容优化版)
-function extractHostname(host) {
-  if (!host) return ''
-  if (host.charCodeAt(0) === 91) { // '[' IPv6
-    const end = host.indexOf(']')
-    return end > -1 ? host.substring(0, end + 1) : host
-  }
-  const idx = host.indexOf(':')
-  if (idx === -1) return host
-  if (host.indexOf(':', idx + 1) !== -1) return host // 裸 IPv6
-  return host.substring(0, idx)
-}
-
 /**
  * {
  *    host : {}
@@ -81,6 +68,9 @@ class Proxy {
     this.urlpreg = /(?:unix:\/\/\/[a-zA-Z0-9\-\_\/\.]+|unix:\/\/[a-zA-Z0-9\-\_]+|(?:http|https):\/\/[\[a-zA-Z0-9\-\_]+)/
 
     this.maxBody = 50000000
+
+    // 初始化时告知的服务端口，用于自动拼接 hostProxy 的 key；'' 或 0 表示不拼接
+    this.port = ''
 
     // 是否启用全代理模式
     this.full = false
@@ -186,6 +176,25 @@ class Proxy {
           }
           break
 
+        case 'port':
+          // '' 和 0 表示不拼接；其他必须为 1~65535
+          if (options[k] === '' || options[k] === 0 || options[k] === '0') {
+            this.port = ''
+          } else if (typeof options[k] === 'number'
+                      || (typeof options[k] === 'string' && /^\d+$/.test(options[k]))) {
+            let p = parseInt(options[k])
+            if (p > 0 && p <= 65535) {
+              this.port = p
+            } else {
+              console.error(`proxy port 超出范围: ${options[k]}`)
+              this.port = ''
+            }
+          } else {
+            console.error(`proxy port 必须是数字或数字字符串: ${options[k]}`)
+            this.port = ''
+          }
+          break
+
         case 'addIP':
           this.addIP = options[k]
           break
@@ -246,12 +255,26 @@ class Proxy {
 
     for (let k in cfg) {
 
+      // 80/443 场景确保裸 + 带端口双 key 共享（key 裸则补带端口，key 带端口则补裸）；
+      // port 为空但 key 带 :80/:443 后缀也补裸；其他端口裸 key 替换为带端口
+      let keys = [k]
+      if (this.port === 80 || this.port === 443) {
+        let bareKey, portKey
+        if (k.endsWith(':80')) { bareKey = k.slice(0, -3); portKey = k }
+        else if (k.endsWith(':443')) { bareKey = k.slice(0, -4); portKey = k }
+        else { bareKey = k; portKey = `${k}:${this.port}` }
+        keys = [bareKey, portKey]
+      } else if (this.port !== '' && !k.endsWith(`:${this.port}`)) {
+        keys = [`${k}:${this.port}`]
+      } else if (this.port === '' && (k.endsWith(':80') || k.endsWith(':443'))) {
+        let bareKey = k.endsWith(':80') ? k.slice(0, -3) : k.slice(0, -4)
+        keys = [bareKey, k]
+      }
+
       if (typeof cfg[k] === 'string') {
         cfg[k] = [{ path: '/', url: cfg[k] }]
-
       } else if (!(cfg[k] instanceof Array) && typeof cfg[k] === 'object') {
         cfg[k] = [cfg[k]]
-
       } else if (!(cfg[k] instanceof Array)) {
         continue
       }
@@ -301,9 +324,11 @@ class Proxy {
           }
         }
 
-        if (this.hostProxy[k] === undefined) {
-          this.hostProxy[k] = {}
-          this.proxyBalance[k] = {}
+        for (let hk of keys) {
+          if (this.hostProxy[hk] === undefined) {
+            this.hostProxy[hk] = {}
+            this.proxyBalance[hk] = {}
+          }
         }
 
         tmp.urlobj = this.parseUrl(tmp.url)
@@ -387,18 +412,27 @@ class Proxy {
           }
         }
 
-        if (this.hostProxy[k][pt] === undefined) {
-          this.hostProxy[k][pt] = [backend_obj]
-          this.proxyBalance[k][pt] = {
+        if (this.hostProxy[keys[0]][pt] === undefined) {
+          this.hostProxy[keys[0]][pt] = [backend_obj]
+          this.proxyBalance[keys[0]][pt] = {
             stepIndex: 0,
             useWeight: false
           }
-        } else if (this.hostProxy[k][pt] instanceof Array) {
-          this.hostProxy[k][pt].push(backend_obj)
+        } else if (this.hostProxy[keys[0]][pt] instanceof Array) {
+          this.hostProxy[keys[0]][pt].push(backend_obj)
+        }
+
+        // 双 key 共享同一数组与 balance（同引用），保证 alive 状态与权重步进一致
+        if (keys.length > 1) {
+          for (let hk of keys) {
+            if (hk === keys[0]) continue
+            this.hostProxy[hk][pt] = this.hostProxy[keys[0]][pt]
+            this.proxyBalance[hk][pt] = this.proxyBalance[keys[0]][pt]
+          }
         }
 
         if (backend_obj.weight > 1) {
-          this.proxyBalance[k][pt].useWeight = true
+          this.proxyBalance[keys[0]][pt].useWeight = true
         }
 
         this.pathTable[pt] = 1
@@ -516,7 +550,7 @@ class Proxy {
     timeoutError.code = 'ETIMEOUT'
 
     return async (c, next) => {
-      let host = extractHostname(c.host)
+      let host = c.host
 
       if (self.hostProxy[host] === undefined || self.hostProxy[host][c.routepath] === undefined) {
         if (self.full) {
@@ -839,6 +873,11 @@ class Proxy {
     app.use(this.mid(), { pre: true, group: `titbit_proxy` })
 
     for (let k in this.hostProxy) {
+      // :80/:443 别名 key：仅当对应裸 key 存在时跳过（裸 key 负责 alive 检测）；
+      // 手工配置的带端口 key 无裸 key 对应，不跳过
+      if (k.endsWith(':80') && this.hostProxy[k.slice(0, -3)] !== undefined) continue
+      if (k.endsWith(':443') && this.hostProxy[k.slice(0, -4)] !== undefined) continue
+
       this.proxyIntervals[k] = {}
 
       for (let p in this.hostProxy[k]) {
