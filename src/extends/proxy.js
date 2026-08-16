@@ -10,20 +10,49 @@ HTTP2_PSEUDO_HEADERS[':path'] = true
 HTTP2_PSEUDO_HEADERS[':scheme'] = true
 HTTP2_PSEUDO_HEADERS[':authority'] = true
 
-const IGNORE_HTTP2_HEADERS = {
+// RFC 7230 §6.1 定义的逐跳（hop-by-hop）头：只对单次连接有意义，
+// 代理必须剥离，不得透传（Transfer-Encoding 等由当前连接层自行决定）
+const HOP_BY_HOP_HEADERS = {
   'connection': true,
   'keep-alive': true,
+  'proxy-authenticate': true,
+  'proxy-authorization': true,
+  'te': true,
+  'trailer': true,
   'transfer-encoding': true,
-  'proxy-connection': true
+  'upgrade': true,
+  'proxy-connection': true // 非标准但广泛存在的事实逐跳头
+}
+
+// 解析 Connection 头列出的额外逐跳头。
+// RFC 7230 §6.1：Connection 值中的每个 token 所指的头同样属于逐跳头。
+// 值可能为字符串或数组（多同名头合并），统一处理。
+function connectionTokens(value) {
+  const tokens = Object.create(null)
+  if (!value) return tokens
+
+  const list = Array.isArray(value) ? value : [value]
+
+  for (const item of list) {
+    if (typeof item !== 'string') continue
+    for (const name of item.split(',')) {
+      const t = name.trim().toLowerCase()
+      if (t) tokens[t] = true
+    }
+  }
+
+  return tokens
 }
 
 function cleanHeadersForHttp1(headers) {
   const h1Headers = Object.create(null)
+  const extraHop = connectionTokens(headers.connection)
 
   for (const k in headers) {
-    if (!HTTP2_PSEUDO_HEADERS[k]) {
-      h1Headers[k] = headers[k]
-    }
+    if (HTTP2_PSEUDO_HEADERS[k]) continue
+    if (HOP_BY_HOP_HEADERS[k] || extraHop[k]) continue
+
+    h1Headers[k] = headers[k]
   }
 
   if (!h1Headers.host && headers[':authority']) {
@@ -575,7 +604,9 @@ class Proxy {
 
       let urlobj = self.copyUrlobj(pr.urlobj)
 
-      urlobj.path = c.req.url
+      // 纯 h2：ctx.req 是 ServerHttp2Stream（无 .url），用 :path 伪头；
+      // ALPN h2：compat API 保证的 req.url 兜底；h1：req.url
+      urlobj.path = c.major === 2 ? (c.headers[':path'] || c.req.url) : c.req.url
       urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
 
@@ -600,14 +631,15 @@ class Proxy {
       }
 
       if (pr.rewrite) {
-        let rw = pr.rewrite(c, c.req.url)
+        let rw = pr.rewrite(c, c.major === 2 ? (c.headers[':path'] || c.req.url) : c.req.url)
 
         if (rw) {
           let path_typ = typeof rw
           if (path_typ === 'string') {
             urlobj.path = rw
           } else if (path_typ === 'object' && rw.redirect) {
-            return c.setHeader('location', rw.redirect)
+            // 重定向必须携带 3xx 状态码，否则客户端收到 200 + location 不会跳转
+            return c.status(302).setHeader('location', rw.redirect)
           }
         }
       }
@@ -617,6 +649,9 @@ class Proxy {
       // 用业务标志位显式跟踪后端响应是否完整接收
       // 不依赖任何私有/非文档属性（如 h.res）
       let responseComplete = false
+
+      // 是否已收到后端响应头：close 兜底时用于区分"无响应关闭"
+      let gotResponse = false
 
       return await new Promise((rv, rj) => {
         let resolved = false
@@ -639,11 +674,19 @@ class Proxy {
         h.on('close', () => {
           if (!resolved && !rejected) {
             resolved = true
+
+            // 后端未返回任何响应即关闭：补 502，
+            // 框架会在中间件链结束后发送，避免客户端悬挂到超时
+            if (!gotResponse) {
+              c.status(502).to(self.error['502'])
+            }
+
             rv()
           }
         })
 
         h.on('response', res => {
+          gotResponse = true
           // ---- 代理传输总时长上限（毫秒）----
           // 优先级：ctx.box > 代理配置项 > 全局默认
           // undefined = 未设置，继续向下一级查找；0 = 显式不限制
@@ -669,15 +712,14 @@ class Proxy {
 
           c.status(res.statusCode)
 
-          if (c.major === 2) {
-            for (let k in res.headers) {
-              if (IGNORE_HTTP2_HEADERS[k]) continue
-              c.setHeader(k, res.headers[k])
-            }
-          } else {
-            for (let k in res.headers) {
-              c.setHeader(k, res.headers[k])
-            }
+          // 响应方向同样剥离逐跳头（含 Connection 头列出的额外头）。
+          // 后端的 Transfer-Encoding 只描述后端那一段连接，当前连接的实际
+          // 编码由 Node 按 Content-Length 有无自动决定，透传会导致冲突
+          const extraHopRes = connectionTokens(res.headers.connection)
+
+          for (const k in res.headers) {
+            if (HOP_BY_HOP_HEADERS[k] || extraHopRes[k]) continue
+            c.setHeader(k, res.headers[k])
           }
 
           // 配置的响应消息头：resHeadersCallback 优先，返回对象则设置；否则设置静态 resHeaders
@@ -696,6 +738,11 @@ class Proxy {
 
           if (c.res.flushHeaders) {
             c.res.flushHeaders()
+          } else if (typeof c.sendHeader === 'function') {
+            // 纯 h2：c.res 是 ServerHttp2Stream（无 flushHeaders），
+            // 必须显式 respond(dataHeaders)，否则 Node 隐式响应会丢失
+            // 已设置的全部响应头与后端状态码
+            c.sendHeader()
           }
 
           res.on('data', chunk => {

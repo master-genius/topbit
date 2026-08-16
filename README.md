@@ -1651,6 +1651,8 @@ let st = new Resource({
     // prepath : '',
 
     // Maximum file size to cache (in bytes); files larger than this will not be cached.
+    // Valid range: 10000 ~ 500000000. Values outside this range are reset to the
+    // default 10000000 (reset, not clamped to the boundary).
     maxFileSize: 12_000_000,
 
     // Set the value of the cache-control header, defaults to null

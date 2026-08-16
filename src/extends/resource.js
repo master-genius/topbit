@@ -159,6 +159,7 @@ class Resource {
       this.maxCacheSize = 10_000_000
     }
 
+    // 有效范围 10000 ~ 500_000_000；越界值会被重置为默认 10MB（注意：是重置，不是钳制到边界值）
     if (this.maxFileSize < 10000 || this.maxFileSize > 500_000_000) {
       this.maxFileSize = 10_000_000
     }
@@ -167,10 +168,12 @@ class Resource {
       this.staticPath = this.staticPath.substring(0, this.staticPath.length-1)
     }
 
-    this.ctypeMap = _typemap
+    // 拷贝模块级 MIME 表，避免多个实例通过 addType / 大写化写入相互污染
+    this.ctypeMap = { ..._typemap }
 
-    for (let k in this.ctypeMap) {
-      this.ctypeMap[ k.toUpperCase() ] = _typemap[k]
+    // 数据源固定为原始表：若遍历 this.ctypeMap，循环中新增的大写 key 会被再次访问并覆盖为 undefined
+    for (let k in _typemap) {
+      this.ctypeMap[k.toUpperCase()] = _typemap[k]
     }
 
   }
@@ -190,13 +193,12 @@ class Resource {
   }
 
   extName(filename) {
-    let extind = filename.length - 1
-    let extstart = filename.length - 6
+    // 扩展名的点必须出现在最后一个路径分隔符之后，避免目录名中的点被误判为扩展名
+    let namestart = filename.lastIndexOf('/')
+    let extind = filename.lastIndexOf('.')
 
-    while (extind > 0 && extind >= extstart) {
-      if (filename[extind] === '.') break
-
-      extind -= 1
+    if (extind <= namestart) {
+      return ''
     }
 
     return filename.substring(extind)
@@ -415,7 +417,11 @@ class Resource {
 
           self.cacheControl && c.setHeader('cache-control', self.cacheControl);
 
-          data = await this.pipeData(pathfile, c, fst.size)
+          // 头部已随流发出，读取失败时无法再回退 404，只能直接终止响应
+          data = await this.pipeData(pathfile, c, fst.size).catch(() => {
+            c.res && c.res.writable && !c.res.writableEnded && c.res.end()
+            return null
+          })
           //说明数据太大，放弃了缓存
           if (!data) return
         }

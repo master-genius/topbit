@@ -1,4 +1,4 @@
-const doio = require('../lib/titbit.js');
+const doio = require('../src/topbit.js');
 
 const app = new doio();
 

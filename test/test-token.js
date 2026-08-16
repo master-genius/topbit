@@ -51,10 +51,11 @@ for (let i = 0; i < 10; i++) {
   console.log(realData)
 }
 
-edata = tok.makeAccessToken(info, 'tit')
+// API 漂移修正：makeAccessToken/verifyAccessToken 已更名为 makeToken/verifyToken
+edata = tok.makeToken(info, 'tit')
 console.log(edata)
 
-console.log(tok.verifyAccessToken(edata))
+console.log(tok.verifyToken(edata))
 
 let total = 100000
 

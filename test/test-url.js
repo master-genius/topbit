@@ -1,6 +1,6 @@
 'use strict'
 
-const parseurl = require('../lib/fastParseUrl').fpurl
+const parseurl = require('../src/fastParseUrl').fpurl
 const url = require('url')
 
 let tmp = ''

@@ -199,10 +199,13 @@ class Http2Pool {
         // 监听流关闭，减少计数
         stream.once('close', () => {
             wrapper.aliveStreams--
-            // 如果有等待队列，唤醒一个
-            if (this.waitQueue.length > 0) {
-                const resolve = this.waitQueue.shift()
-                resolve(wrapper)
+            // 唤醒等待者前检查连接可用性与并发余量，避免超发
+            // （与 'connect' 事件处的唤醒逻辑保持一致）
+            if (wrapper.connected && !wrapper.session.destroyed) {
+                while (this.waitQueue.length > 0 && wrapper.aliveStreams < wrapper.streamLimit) {
+                    const resolve = this.waitQueue.shift()
+                    resolve(wrapper)
+                }
             }
         })
         

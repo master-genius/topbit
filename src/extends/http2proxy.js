@@ -3,6 +3,40 @@
 const http2 = require('node:http2')
 const Http2Pool = require('./Http2Pool.js')
 
+// RFC 7230 §6.1 定义的逐跳（hop-by-hop）头：只对单次连接有意义，
+// 代理必须剥离，不得透传（h2 协议本身也禁止这些头）
+const HOP_BY_HOP_HEADERS = {
+  'connection': true,
+  'keep-alive': true,
+  'proxy-authenticate': true,
+  'proxy-authorization': true,
+  'te': true,
+  'trailer': true,
+  'transfer-encoding': true,
+  'upgrade': true,
+  'proxy-connection': true // 非标准但广泛存在的事实逐跳头
+}
+
+// 解析 Connection 头列出的额外逐跳头。
+// RFC 7230 §6.1：Connection 值中的每个 token 所指的头同样属于逐跳头。
+// 值可能为字符串或数组（多同名头合并），统一处理。
+function connectionTokens (value) {
+  const tokens = Object.create(null)
+  if (!value) return tokens
+
+  const list = Array.isArray(value) ? value : [value]
+
+  for (const item of list) {
+    if (typeof item !== 'string') continue
+    for (const name of item.split(',')) {
+      const t = name.trim().toLowerCase()
+      if (t) tokens[t] = true
+    }
+  }
+
+  return tokens
+}
+
 let error_502_text = `<!DOCTYPE html><html>
       <head>
         <meta charset="UTF-8">
@@ -189,7 +223,7 @@ Http2Proxy.prototype.checkConfig = function (tmp, k) {
   tmp.path = tmp.path.trim().replace(/(\/){2,}/g, '/')
 
   if (tmp.path.length > 2 && tmp.path[tmp.path.length - 1] === '/') {
-    tmp.path = tmp.substring(0, tmp.path.length-1)
+    tmp.path = tmp.path.substring(0, tmp.path.length - 1)
   }
 
   if (tmp.url === undefined) {
@@ -430,8 +464,13 @@ Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
     ':path': headers[':path'] || (ctx.req && ctx.req.url) || ctx.path,
   }
 
+  // Connection 头列出的额外逐跳头，转换时一并剥离
+  const extraHop = connectionTokens(headers.connection)
+
   for (let k in headers) {
     //if (typeof k !== 'string') continue
+
+    if (extraHop[k]) continue
 
     switch (k) {
       case 'connection':
@@ -439,11 +478,15 @@ Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
       case 'upgrade':
       case 'transfer-encoding':
       case 'proxy-connection':
+      case 'proxy-authenticate':
+      case 'proxy-authorization':
+      case 'te':
+      case 'trailer':
       case ':path':
       case ':method':
       case 'method':
         break
-      
+
       case 'host':
         http2_headers[':authority'] = headers[k]
         break
@@ -496,7 +539,8 @@ Http2Proxy.prototype.mid = function () {
         if (rpath) {
           let path_typ = typeof rpath
           if (path_typ === 'object' && rpath.redirect) {
-            return c.setHeader('location', rpath.redirect)
+            // 重定向必须携带 3xx 状态码，否则客户端收到 200 + location 不会跳转
+            return c.status(302).setHeader('location', rpath.redirect)
           } else if (path_typ === 'string') {
             if (c.major > 1)
               c.headers[':path'] = rpath
@@ -508,9 +552,19 @@ Http2Proxy.prototype.mid = function () {
       await new Promise(async (rv, rj) => {
         let resolved = false
         let rejected = false
-        let request_stream = c.stream
+
+        // ctx.stream 的类型随服务形态不同：
+        // 纯 h2：ServerHttp2Stream（本体即 h2 流）；
+        // ALPN h2：Http2ServerResponse（底层 h2 流在 .stream 属性上）；
+        // ALPN h1 / 纯 h1：ServerResponse 或不存在 → 归一化为 null，走 h1 分支。
+        // 判别只用文档化属性（.stream + c.major），跨 Node 版本安全
+        let request_stream = null
+        if (c.major > 1 && c.stream) {
+          request_stream = c.stream.stream || c.stream
+        }
+
         let stm = null
-        
+
         stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
                       .catch(err => {
                           rejected = true
@@ -523,27 +577,32 @@ Http2Proxy.prototype.mid = function () {
           return false
         }
 
-        c.stream.on('timeout', () => {
-          stm.close(http2.constants.NGHTTP2_CANCEL)
-          //stm.destroy()
-        })
+        if (request_stream) {
+          // h2 下游：close 是所有终止路径（正常/超时/取消/错误）的统一出口，
+          // rstCode 携带取消原因，不再监听冗余的 aborted
+          request_stream.on('timeout', () => {
+            stm.close(http2.constants.NGHTTP2_CANCEL)
+          })
 
-        c.stream.on('close', () => {
-          if (request_stream && request_stream.rstCode !== http2.constants.NGHTTP2_NO_ERROR) {
-            stm.close(request_stream.rstCode)
-          }
-        })
+          request_stream.on('close', () => {
+            if (request_stream.rstCode !== http2.constants.NGHTTP2_NO_ERROR) {
+              stm.close(request_stream.rstCode)
+            }
+          })
 
-        c.stream.on('error', err => {
-          stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
-          stm.destroy()
-        })
-
-        c.stream.on('aborted', err => {
-          !request_stream.destroyed && request_stream.destroy()
-          //stm.close(http2.constants.NGHTTP2_CANCEL)
-          stm.destroy()
-        })
+          request_stream.on('error', err => {
+            stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+            stm.destroy()
+          })
+        } else if (c.res && typeof c.res.on === 'function') {
+          // h1 下游：响应未完成即关闭 = 客户端提前断开 → 终止上游流。
+          // 'close' 覆盖正常/中断全部路径，writableEnded 为判别依据；
+          // 不用已弃用的 'aborted'/req.aborted，也不用 destroyed
+          // （流正常完成后 destroyed 同样为 true，会把正常响应误判为中断）
+          c.res.on('close', () => {
+            if (!c.res.writableEnded && !stm.destroyed) stm.destroy()
+          })
+        }
 
         stm.setTimeout(pr.timeout, () => {
           //stm.close(http2.constants.NGHTTP2_CANCEL)
@@ -593,6 +652,19 @@ Http2Proxy.prototype.mid = function () {
             }, rt)
             // h2 流 close 是所有结束路径的终点，仅此处清理即可
             stm.on('close', () => clearTimeout(rtTimer))
+          }
+
+          // 防御性剥离逐跳头：后端是 h2，协议本身禁止发送这些头，
+          // 此处过滤兜底异常后端（透传给 h2 客户端会被 nghttp2 判协议错误）
+          const extraHopRes = connectionTokens(headers.connection)
+
+          for (let k in headers) {
+            if (k === ':status') continue
+            if (typeof k !== 'string') continue
+
+            if (k[0] === ':' || HOP_BY_HOP_HEADERS[k] || extraHopRes[k]) {
+              delete headers[k]
+            }
           }
 
           if (c.res && c.res.writable) {
@@ -648,11 +720,24 @@ Http2Proxy.prototype.mid = function () {
         })
 
         c.req.on('data', chunk => {
-          stm.write(chunk)
+          // stm 已销毁（后端错误/超时/取消）时丢弃数据，
+          // 避免 write 抛出 ERR_STREAM_DESTROYED 未捕获异常
+          if (stm.destroyed) return
+
+          // 背压控制：h2 流控窗口耗尽时 write 返回 false，
+          // 暂停客户端读取，drain 后恢复，防止数据在流缓冲无限堆积
+          let ok = stm.write(chunk)
+          if (!ok) {
+            c.req.pause()
+            stm.once('drain', () => {
+              c.req.resume()
+            })
+          }
         })
 
         c.req.on('end', () => {
-          stm.end()
+          // stm 未销毁才 end，否则忽略
+          !stm.destroyed && stm.end()
         })
 
         const onDrain = () => stm.resume()
