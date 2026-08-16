@@ -3,3 +3,4 @@
 /test/topbit-monitor.log
 /node_modules/
 /demo/tmp/
+.qwen/
