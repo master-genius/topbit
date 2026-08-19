@@ -78,6 +78,31 @@ function cleanHeadersForHttp1(headers) {
  *
  */
 
+
+// 后端错误码 → 网关状态码映射
+// 超时（含自造的 ETIMEOUT）语义上是上游超时 → 504；
+// 连接层面不可达（拒绝/复位/DNS/网络不可达）→ 502；
+// 其余不确定错误保持 503。
+const GATEWAY_TIMEOUT_CODES = {
+  ETIMEOUT: true, ETIMEDOUT: true, ESOCKETTIMEDOUT: true
+}
+
+const BAD_GATEWAY_CODES = {
+  ECONNREFUSED: true, ECONNRESET: true, EHOSTUNREACH: true, ENETUNREACH: true,
+  ENOTFOUND: true, EAI_AGAIN: true, EPIPE: true, EPROTO: true,
+  ERR_TLS_CERT_ALTNAME_INVALID: true, ERR_HTTP2_ERROR: true,
+  ERR_HTTP2_SESSION_ERROR: true, ERR_HTTP2_GOAWAY_SESSION: true
+}
+
+function mapErrorStatus(err) {
+  const code = err && err.code
+  if (!code) return 503
+  if (code === 'EMAXBODY') return 413
+  if (GATEWAY_TIMEOUT_CODES[code]) return 504
+  if (BAD_GATEWAY_CODES[code]) return 502
+  return 503
+}
+
 class Proxy {
 
   constructor(options = {}) {
@@ -151,6 +176,34 @@ class Proxy {
             <div style="width:100%;font-size:105%;color:#737373;padding:0.8rem;">
               <h2>503 Service Unavailable</h2><br>
               <p>此服务暂时不可用。</p>
+            </div>
+          </body>
+      </html>`,
+
+      '504': `<!DOCTYPE html><html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Error 504</title>
+          </head>
+          <body>
+            <div style="width:100%;font-size:105%;color:#737373;padding:0.8rem;">
+              <h2>504 Gateway Timeout</h2><br>
+              <p>代理请求超时。</p>
+            </div>
+          </body>
+      </html>`,
+
+      '413' :`<!DOCTYPE html><html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Error 413</title>
+          </head>
+          <body>
+            <div style="width:100%;font-size:105%;color:#737373;padding:0.8rem;">
+              <h2>413 Payload Too Large</h2><br>
+              <p>请求数据超过允许的大小。</p>
             </div>
           </body>
       </html>`
@@ -376,6 +429,8 @@ class Proxy {
           urlobj: tmp.urlobj,
           // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
           requestTimeout: tmp.requestTimeout,
+          // 透传后端级请求体上限；undefined 表示未设置，回退到代理实例配置
+          maxBody: tmp.maxBody,
           headers: {},
           resHeaders: null,
           resHeadersCallback: null,
@@ -534,7 +589,10 @@ class Proxy {
     let pb = this.proxyBalance[host][c.routepath]
 
     if (this.balancer) {
-      return this.balancer.select(c, prlist, pb)
+      // 第三方 balancer 的返回值不受本模块控制：非对象一律归一化为 null，
+      // 交由上层走"重试 → 503"路径，避免 undefined 直接被解引用抛 TypeError
+      const picked = this.balancer.select(c, prlist, pb)
+      return (picked && typeof picked === 'object') ? picked : null
     }
 
     let pr
@@ -577,6 +635,9 @@ class Proxy {
     let self = this
     let timeoutError = new Error('request timeout')
     timeoutError.code = 'ETIMEOUT'
+
+    let maxBodyError = new Error('request body too large')
+    maxBodyError.code = 'EMAXBODY'
 
     return async (c, next) => {
       let host = c.host
@@ -643,6 +704,27 @@ class Proxy {
           }
         }
       }
+
+      // ---- 代理请求体上限（字节）----
+      // 优先级：ctx.box.proxyMaxBody > 后端配置 maxBody > 代理实例 maxBody
+      // 之所以不直接用 ctx.maxBody：框架必定会给它赋上 config.maxBody，
+      // 无法区分"前置中间件显式设置"与"框架默认值"，故另立 box 字段。
+      // 语义与框架 maxBody 一致：按累计字节数直接比较，0 即不允许请求体。
+      let maxBodyLimit = self.maxBody
+      if (c.box && typeof c.box.proxyMaxBody === 'number' && !isNaN(c.box.proxyMaxBody)) {
+        maxBodyLimit = c.box.proxyMaxBody
+      } else if (pr && typeof pr.maxBody === 'number' && !isNaN(pr.maxBody)) {
+        maxBodyLimit = pr.maxBody
+      }
+
+      // 预检：声明了 content-length 且已超限，直接拒绝，不必与后端建立连接
+      let declaredLength = parseInt(c.headers['content-length'])
+      if (!isNaN(declaredLength) && declaredLength > maxBodyLimit) {
+        return c.status(413).to(self.error['413'])
+      }
+
+      let bodyLength = 0
+      let bodyOversize = false
 
       let h = hci.request(urlobj)
 
@@ -791,6 +873,16 @@ class Proxy {
           // 避免抛出 ERR_STREAM_DESTROYED 未捕获异常
           if (h.destroyed) return
 
+          // chunked 等无 content-length 的场景：边转发边累计，超限即终止后端请求
+          bodyLength += chunk.length
+          if (bodyLength > maxBodyLimit) {
+            if (!bodyOversize) {
+              bodyOversize = true
+              h.destroy(maxBodyError)
+            }
+            return
+          }
+
           // 背压控制：write 返回 false 时暂停上游，等 drain 后恢复
           let ok = h.write(chunk)
           if (!ok) {
@@ -807,15 +899,19 @@ class Proxy {
         })
       }).catch(err => {
         self.debug && console.error(err)
-        c.status(503).to(self.error['503'])
+        // 按错误类型区分网关语义：超时 504 / 不可达 502 / 其他 503
+        let st = mapErrorStatus(err)
+        c.status(st).to(self.error[`${st}`])
       })
       .finally(() => {
         if (self.autoClearListeners && h.removeAllListeners) {
           h.removeAllListeners()
         }
 
-        // responseComplete 为 true：响应已正常完成，Agent 自动归还 socket，无需 destroy
-        // responseComplete 为 false：异常/超时/客户端断开，兜底销毁，释放资源
+        // 兜底销毁：仅用于异常/超时/客户端提前断开的路径。
+        // 注意 Node 在响应正常结束时已把 ClientRequest 置为 destroyed，
+        // 因此正常路径下本分支不会进入，keep-alive socket 的归还不受影响；
+        // responseComplete 只是一层显式的双保险，并非归还连接的必要条件。
         if (!h.destroyed && !responseComplete) {
           h.destroy()
         }
@@ -914,10 +1010,10 @@ class Proxy {
     app.config.timeout = this.timeout
 
     for (let p in this.pathTable) {
-      app.router.map(this.methods, p, async c => { }, '@titbit_proxy')
+      app.router.map(this.methods, p, async c => { }, '@topbit_proxy')
     }
 
-    app.use(this.mid(), { pre: true, group: `titbit_proxy` })
+    app.use(this.mid(), { pre: true, group: `topbit_proxy` })
 
     for (let k in this.hostProxy) {
       // :80/:443 别名 key：仅当对应裸 key 存在时跳过（裸 key 负责 alive 检测）；

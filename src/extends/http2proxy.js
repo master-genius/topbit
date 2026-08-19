@@ -65,6 +65,65 @@ let error_503_text = `<!DOCTYPE html><html>
       </body>
   </html>`
 
+let error_504_text = `<!DOCTYPE html><html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error 504</title>
+      </head>
+      <body>
+        <div style="width:100%;font-size:105%;color:#737373;padding:0.8rem;">
+          <h2>504 Gateway Timeout</h2><br>
+          <p>代理请求超时。</p>
+        </div>
+      </body>
+  </html>`
+
+let error_413_text = `<!DOCTYPE html><html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error 413</title>
+      </head>
+      <body>
+        <div style="width:100%;font-size:105%;color:#737373;padding:0.8rem;">
+          <h2>413 Payload Too Large</h2><br>
+          <p>请求数据超过允许的大小。</p>
+        </div>
+      </body>
+  </html>`
+
+// 后端错误码 → 网关状态码映射
+// 超时（含自造的 ETIMEOUT）语义上是上游超时 → 504；
+// 连接层面不可达（拒绝/复位/DNS/网络不可达）→ 502；
+// 其余不确定错误保持 503。
+const GATEWAY_TIMEOUT_CODES = {
+  ETIMEOUT: true, ETIMEDOUT: true, ESOCKETTIMEDOUT: true
+}
+
+const BAD_GATEWAY_CODES = {
+  ECONNREFUSED: true, ECONNRESET: true, EHOSTUNREACH: true, ENETUNREACH: true,
+  ENOTFOUND: true, EAI_AGAIN: true, EPIPE: true, EPROTO: true,
+  ERR_TLS_CERT_ALTNAME_INVALID: true, ERR_HTTP2_ERROR: true,
+  ERR_HTTP2_SESSION_ERROR: true, ERR_HTTP2_GOAWAY_SESSION: true
+}
+
+const ERROR_PAGE = {
+  413: error_413_text,
+  502: error_502_text,
+  503: error_503_text,
+  504: error_504_text
+}
+
+function mapErrorStatus(err) {
+  const code = err && err.code
+  if (!code) return 503
+  if (code === 'EMAXBODY') return 413
+  if (GATEWAY_TIMEOUT_CODES[code]) return 504
+  if (BAD_GATEWAY_CODES[code]) return 502
+  return 503
+}
+
 function fmtpath(path) {
   path = path.trim()
   if (path.length == 0) {
@@ -356,6 +415,8 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         maxAliveStreams: this.maxAliveStreams,
         // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
         requestTimeout: tmp.requestTimeout,
+        // 透传后端级请求体上限；undefined 表示未设置，回退到代理实例配置
+        maxBody: tmp.maxBody,
         alive: false,
         connectOptions: {
           timeout: this.timeout,
@@ -375,9 +436,7 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         debug: backend_obj.debug,
         url: backend_obj.url,
         connectOptions: backend_obj.connectOptions,
-        parent: backend_obj,
         reconnDelay: backend_obj.reconnDelay,
-        quiet: true,
         timeout: backend_obj.timeout,
         connectTimeout: backend_obj.connectTimeout,
         maxAliveStreams: backend_obj.maxAliveStreams,
@@ -428,7 +487,10 @@ Http2Proxy.prototype.getBackend = function (c, host) {
   let pxybalance = this.proxyBalance[host][c.routepath]
 
   if (this.balancer) {
-    return this.balancer.select(c, prlist, pxybalance)
+    // 第三方 balancer 的返回值不受本模块控制：非对象一律归一化为 null，
+    // 交由上层统一走 503，避免 undefined 直接被解引用抛 TypeError
+    const picked = this.balancer.select(c, prlist, pxybalance)
+    return (picked && typeof picked === 'object') ? picked : null
   }
 
   let pr
@@ -506,6 +568,9 @@ Http2Proxy.prototype.mid = function () {
 
   timeoutError.code = 'ETIMEOUT'
 
+  let maxBodyError = new Error('request body too large')
+  maxBodyError.code = 'EMAXBODY'
+
   return async (c, next) => {
     let host = c.host
 
@@ -549,9 +614,42 @@ Http2Proxy.prototype.mid = function () {
         }
       }
 
+      // ---- 代理请求体上限（字节）----
+      // 优先级：ctx.box.proxyMaxBody > 后端配置 maxBody > 代理实例 maxBody
+      // 之所以不直接用 ctx.maxBody：框架必定会给它赋上 config.maxBody，
+      // 无法区分"前置中间件显式设置"与"框架默认值"，故另立 box 字段。
+      // 语义与框架 maxBody 一致：按累计字节数直接比较，0 即不允许请求体。
+      let maxBodyLimit = self.maxBody
+      if (c.box && typeof c.box.proxyMaxBody === 'number' && !isNaN(c.box.proxyMaxBody)) {
+        maxBodyLimit = c.box.proxyMaxBody
+      } else if (pr && typeof pr.maxBody === 'number' && !isNaN(pr.maxBody)) {
+        maxBodyLimit = pr.maxBody
+      }
+
+      // 预检：声明了 content-length 且已超限，直接拒绝，不必占用后端流
+      let declaredLength = parseInt(c.headers['content-length'])
+      if (!isNaN(declaredLength) && declaredLength > maxBodyLimit) {
+        return c.status(413).to(error_413_text)
+      }
+
+      let bodyLength = 0
+
+      // 注意这里是 async executor：new Promise 只接管 executor 的「同步」抛出，
+      // async 函数的抛出会变成它自己返回的那个被 reject 的 Promise，new Promise
+      // 根本不看，于是外层 await 永不 settle → 请求永久挂起（不是 503，是挂死）。
+      // 之所以仍用 async，是因为内部要 await 后端流的建立；
+      // 代价用整体 try/catch 兜住：任何逃逸异常都转成 reject，交给外层统一映射状态码。
       await new Promise(async (rv, rj) => {
         let resolved = false
         let rejected = false
+
+        const failsafe = err => {
+          if (resolved || rejected) return
+          rejected = true
+          rj(err)
+        }
+
+        try {
 
         // ctx.stream 的类型随服务形态不同：
         // 纯 h2：ServerHttp2Stream（本体即 h2 流）；
@@ -567,14 +665,14 @@ Http2Proxy.prototype.mid = function () {
 
         stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
                       .catch(err => {
-                          rejected = true
-                          rj(err)
+                          failsafe(err)
                           stm = null
                       })
 
+        // 建流失败时 failsafe 已 reject，这里只做兜底（避免 catch 未触发却拿到空值）
         if (!stm) {
-          rj(new Error('request failed'))
-          return false
+          failsafe(new Error('request failed'))
+          return
         }
 
         if (request_stream) {
@@ -724,6 +822,17 @@ Http2Proxy.prototype.mid = function () {
           // 避免 write 抛出 ERR_STREAM_DESTROYED 未捕获异常
           if (stm.destroyed) return
 
+          // chunked 等无 content-length 的场景：边转发边累计，超限即终止后端流
+          bodyLength += chunk.length
+          if (bodyLength > maxBodyLimit) {
+            if (!resolved && !rejected) {
+              rejected = true
+              !stm.destroyed && stm.destroy()
+              rj(maxBodyError)
+            }
+            return
+          }
+
           // 背压控制：h2 流控窗口耗尽时 write 返回 false，
           // 暂停客户端读取，drain 后恢复，防止数据在流缓冲无限堆积
           let ok = stm.write(chunk)
@@ -740,20 +849,27 @@ Http2Proxy.prototype.mid = function () {
           !stm.destroyed && stm.end()
         })
 
-        const onDrain = () => stm.resume()
-        if (c.res) c.res.on('drain', onDrain)
-
         stm.on('data', chunk => {
-          if (c.res && c.res.writable) {
-            if (c.res.write(chunk) === false) {
-              stm.pause()
-            }
+          // 客户端已不可写（提前断开）：继续从后端抽数据只会白白占用上游连接
+          // 与流控窗口，直接终止上游流，尽早释放后端资源。
+          // 终止后由 stm 的 'close' 统一 settle，不会造成挂起。
+          if (!c.res || !c.res.writable) {
+            !stm.destroyed && stm.destroy()
+            return
+          }
+
+          // 背压：write 返回 false 时暂停上游，等 drain 后恢复，与请求方向一致。
+          // 监听在此处按需注册且用 once：暂停后不再有 data 事件，
+          // 因此同一时刻至多存在一个待触发的 drain 监听，用完即弃、无需手动摘除。
+          // （不可改为在请求开始时注册一个常驻 once 监听：它会被第一次 drain
+          //   消费掉，此后的背压将 pause 而无人 resume，上游流永久停住。）
+          if (c.res.write(chunk) === false) {
+            stm.pause()
+            c.res.once('drain', () => stm.resume())
           }
         })
 
         stm.on('end', () => {
-          if (c.res) c.res.removeListener('drain', onDrain)
-          
           !stm.closed && stm.close()
 
           if (!resolved && !rejected) {
@@ -762,10 +878,16 @@ Http2Proxy.prototype.mid = function () {
           }
         })
 
+        } catch (err) {
+          // executor 内部逃逸的异常：转成 reject，避免外层 await 永久挂起
+          failsafe(err)
+        }
       })
     } catch (err) {
       self.debug && console.error(err||'request null error')
-      c.status(503).to(error_503_text)
+      // 按错误类型区分网关语义：超时 504 / 不可达 502 / 其他 503
+      let st = mapErrorStatus(err)
+      c.status(st).to(ERROR_PAGE[st])
     }
 
   }

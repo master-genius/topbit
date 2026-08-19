@@ -1864,6 +1864,50 @@ const pxy = new Proxy({
 pxy.init(app)
 ```
 
+**Request body size limit:** the proxy is a `pre` middleware and streams the request body to the backend before the framework ever reads it, so the **framework's `maxBody` does not apply to proxied requests** — the proxy enforces its own limit.
+
+Precedence (same shape as `requestTimeout`):
+
+| Priority | Source | Description |
+|---|---|---|
+| 1 | `ctx.box.proxyMaxBody` | Set by a pre middleware, applies to that one request |
+| 2 | backend option `maxBody` | Per-backend override |
+| 3 | proxy option `maxBody` | Defaults to `50000000` (50MB) |
+
+The comparison matches the framework's: accumulated bytes against the limit, so `0` means no request body is allowed. A request that declares a `content-length` over the limit is rejected up front (no backend connection is opened); `chunked` requests are counted while forwarding and aborted as soon as they exceed it. Both return **413**.
+
+```javascript
+// The pre middleware must be registered BEFORE pxy.init(app) to run ahead of the proxy
+app.use(async (c, next) => {
+    if (c.path.startsWith('/upload')) c.box.proxyMaxBody = 100 * 1024 * 1024
+    return await next(c)
+}, {pre: true})
+
+const pxy = new Proxy({
+    maxBody: 2 * 1024 * 1024,   // instance default
+    config: {
+        'a.com': [
+            { url: 'http://127.0.0.1:1234', maxBody: 20 * 1024 * 1024 }  // per-backend override
+        ]
+    }
+})
+
+pxy.init(app)
+```
+
+**About `ProxyNoAgent`:** the extensions also ship `ProxyNoAgent`, used exactly like `Proxy` except that it keeps no per-backend `http(s).Agent` and relies on the global agent instead.
+
+> Since Node.js >= 19 `http.globalAgent` defaults to `keepAlive: true`, so `ProxyNoAgent` **still reuses connections** by default. Pass `keepAlive: false` explicitly if you really want one connection per request.
+
+```javascript
+const {ProxyNoAgent} = Topbit.extensions
+
+const pxy = new ProxyNoAgent({
+    config: { 'a.com': 'http://127.0.0.1:1234' },
+    keepAlive: false  // disable connection reuse
+})
+```
+
 ---
 
 ### 6. Http2Proxy (HTTP/2 Reverse Proxy)
@@ -1902,6 +1946,20 @@ hxy.init(app)
 
 app.run(1234)
 ```
+
+**Connection pool behavior:**
+
+| Option | Default | Description |
+|---|---|---|
+| `connectTimeout` | `15000` | Handshake wait limit for a new HTTP/2 connection (ms). This is the `Http2Proxy` default; the pool itself falls back to `5000` |
+| `reconnDelay` | `500` | **Initial** reconnect interval; grows exponentially on repeated failure |
+| `maxConnect` | `100` | Max physical connections per backend |
+| `maxAliveStreams` | `100` | Max concurrent streams per connection, converged to `min(config, peer SETTINGS)` |
+| `minConnect` | `2` | Resident connections kept open while idle; also the refill threshold after an abnormal disconnect. Set `0` to disable |
+
+- **Graceful restart**: on GOAWAY the connection stops accepting new streams immediately but drains in-flight streams to completion (30s cap) before closing, so response bodies are never silently truncated.
+- **Idle keepalive**: connections within the resident quota (`minConnect`, default 2) are **never** closed when idle — they are kept alive with periodic `ping`. Persistent connections are the whole point of an HTTP/2 proxy (no handshake, multiplexing), and holding a live connection is itself the reachability signal `ok()` reports. Only surplus connections are reclaimed, and they are not reconnected, so a zero-traffic backend stays usable without spinning on reconnects.
+- **Reconnect backoff**: while a backend is down the reconnect interval grows as `reconnDelay × 2ⁿ`, capped at 30s.
 
 ---
 

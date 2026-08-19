@@ -1901,6 +1901,50 @@ const pxy = new Proxy({
 pxy.init(app)
 ```
 
+**请求体大小限制：** 代理是 `pre` 中间件，会抢在框架读取请求体之前把数据流式转发给后端，因此**框架的 `maxBody` 对被代理的请求不生效**，限额由代理自己执行。
+
+取值优先级（与 `requestTimeout` 一致）：
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 | `ctx.box.proxyMaxBody` | 前置中间件按业务动态设置，仅对本次请求有效 |
+| 2 | 后端配置项 `maxBody` | 单个后端单独配置 |
+| 3 | 代理实例 `maxBody` | 默认 `50000000`（50MB） |
+
+判定方式与框架一致：按累计字节数直接比较，因此 `0` 表示不允许携带请求体。声明了 `content-length` 且已超限的请求会被直接拒绝（不与后端建立连接）；`chunked` 等无 `content-length` 的请求边转发边累计，超限即中断后端请求。两种情况都返回 **413**。
+
+```javascript
+// 前置中间件必须注册在 pxy.init(app) 之前才会先于代理执行
+app.use(async (c, next) => {
+    if (c.path.startsWith('/upload')) c.box.proxyMaxBody = 100 * 1024 * 1024
+    return await next(c)
+}, {pre: true})
+
+const pxy = new Proxy({
+    maxBody: 2 * 1024 * 1024,   // 实例级默认
+    config: {
+        'a.com': [
+            { url: 'http://127.0.0.1:1234', maxBody: 20 * 1024 * 1024 }  // 后端级覆盖
+        ]
+    }
+})
+
+pxy.init(app)
+```
+
+**关于 `ProxyNoAgent`：** 扩展中还提供了 `ProxyNoAgent`，用法与 `Proxy` 完全一致，区别是不为每个后端维护独立的 `http(s).Agent`，而是走全局 Agent。
+
+> Node.js >= 19 起 `http.globalAgent` 默认 `keepAlive: true`，因此 `ProxyNoAgent` 默认**仍会复用连接**。若确实需要"一请求一连接"的语义，请显式传入 `keepAlive: false`。
+
+```javascript
+const {ProxyNoAgent} = Topbit.extensions
+
+const pxy = new ProxyNoAgent({
+    config: { 'a.com': 'http://127.0.0.1:1234' },
+    keepAlive: false  // 关闭连接复用，每个请求新建连接
+})
+```
+
 ---
 
 ### 6. Http2Proxy (HTTP/2 反向代理)
@@ -1939,6 +1983,20 @@ hxy.init(app)
 
 app.run(1234)
 ```
+
+**连接池行为说明：**
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `connectTimeout` | `15000` | 新建 HTTP/2 连接的握手等待上限（毫秒）。此为 `Http2Proxy` 的默认值，连接池自身缺省为 `5000` |
+| `reconnDelay` | `500` | 断线重连的**起始**间隔，随失败次数指数退避 |
+| `maxConnect` | `100` | 单后端最大物理连接数 |
+| `maxAliveStreams` | `100` | 单连接并发流上限，收到对端 SETTINGS 后按 `min(配置, 对端声明)` 收敛 |
+| `minConnect` | `2` | 常驻连接数：零流量时保持不关闭，异常断开后低于此值自动补连。设为 `0` 关闭常驻 |
+
+- **优雅重启**：收到对端 GOAWAY 后，连接立即停止接收新流，但会等待存量流完整收完再关闭（排水上限 30 秒），不会造成响应体被静默截断。
+- **空闲保活**：常驻名额（`minConnect`，默认 2）内的连接零流量时**不关闭**，仅周期性 `ping` 保活——持久连接是 HTTP/2 代理的核心优势（免握手、多路复用），且「握有活连接」本身就是后端可达的健康信号。超出常驻数的富余连接才会被优雅回收，且回收后不补连，因此零流量下既保持可用又不会空转重连。
+- **重连退避**：后端不可用时重连间隔按 `reconnDelay × 2ⁿ` 增长，上限 30 秒。
 
 ---
 

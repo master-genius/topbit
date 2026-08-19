@@ -36,9 +36,14 @@ class ConsistentBalancer {
       return this.fallback(prlist, pxybalance)
     }
 
-    // 2. 过滤健康的后端 (基于你原有的 checkAlive 逻辑)
-    // 注意：pr.h2Pool.ok() 是判断连接池是否正常的关键
-    const aliveBackends = prlist.filter(pr => pr.h2Pool && pr.h2Pool.ok())
+    // 2. 过滤健康的后端
+    // http2 代理（Http2Proxy）：以连接池状态 h2Pool.ok() 为准；
+    // h1 代理（Proxy / ProxyNoAgent）：后端无 h2Pool，以定时探活写入的 pr.alive 为准。
+    // 早期实现只判断 h2Pool，导致 h1 代理下 aliveBackends 恒为空、探活结果被完全绕过。
+    const aliveBackends = prlist.filter(pr => {
+      if (pr.h2Pool) return pr.h2Pool.ok()
+      return pr.alive !== false
+    })
 
     const targets = aliveBackends.length > 0 ? aliveBackends : prlist
 
