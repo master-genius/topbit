@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" width="960" height="720" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Source Han Sans SC','Noto Sans CJK SC',sans-serif">
+  <defs>
+    <marker id="ahi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2d6cb5"/>
+    </marker>
+    <marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b5562d"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="720" fill="#fbfbfc"/>
+
+  <text x="36" y="40" font-size="19" fill="#222" font-weight="600">topbit 中间件洋葱模型</text>
+  <text x="36" y="63" font-size="13" fill="#666">请求由外向内逐层进入，响应由内向外逐层返回；同一中间件里 next(c) 前后分属两个方向</text>
+
+  <g transform="translate(320,368)">
+    <circle r="292" fill="#eef0f3" stroke="#a9b0bd" stroke-width="1.2"/>
+    <circle r="246" fill="#dfe7f5" stroke="#8296bb" stroke-width="1.4"/>
+    <circle r="200" fill="#eef0f3" stroke="#a9b0bd" stroke-width="1.2"/>
+    <circle r="154" fill="#f5f6f9" stroke="#a9b0bd" stroke-width="1.2"/>
+    <circle r="108" fill="#dfe7f5" stroke="#8296bb" stroke-width="1.4"/>
+    <circle r="60"  fill="#c9d3ea" stroke="#66799f" stroke-width="1.5"/>
+
+    <text y="276" text-anchor="middle" font-size="14" fill="#555">最终响应层 · setfinal</text>
+    <text y="230" text-anchor="middle" font-size="15" fill="#24406e" font-weight="600">Pre 中间件 · app.pre</text>
+    <text y="184" text-anchor="middle" font-size="14" fill="#555">请求体接收</text>
+    <text y="138" text-anchor="middle" font-size="14" fill="#555">请求体解析 · parseBody</text>
+    <text y="92"  text-anchor="middle" font-size="15" fill="#24406e" font-weight="600">Use 中间件 · app.use</text>
+    <text y="-4"  text-anchor="middle" font-size="15.5" fill="#22304d" font-weight="600">路由回调</text>
+    <text y="17"  text-anchor="middle" font-size="12" fill="#4d5a78">requestCall</text>
+  </g>
+
+  <path d="M 56 104 L 274 322" stroke="#2d6cb5" stroke-width="2.4" fill="none" marker-end="url(#ahi)"/>
+  <text x="36" y="92" font-size="13.5" fill="#2d6cb5" font-weight="600">Request 请求</text>
+
+  <path d="M 366 414 L 604 652" stroke="#b5562d" stroke-width="2.4" fill="none" marker-end="url(#aho)"/>
+  <text x="536" y="676" font-size="13.5" fill="#b5562d" font-weight="600">Response 响应</text>
+
+  <text x="36" y="700" font-size="12" fill="#888">路由匹配与上下文初始化在洋葱之外完成；未命中路由直接返回 404，不进入任何中间件</text>
+
+  <g transform="translate(650,116)">
+    <line x1="0" y1="-16" x2="30" y2="-16" stroke="#2d6cb5" stroke-width="2.4"/>
+    <text x="40" y="-11" font-size="13" fill="#2d6cb5" font-weight="600">进入顺序</text>
+    <text y="16" font-size="12.5" fill="#555">① 最终响应层</text>
+    <text y="37" font-size="12.5" fill="#24406e" font-weight="600">② Pre 中间件（按注册顺序）</text>
+    <text y="58" font-size="12.5" fill="#555">③ 请求体接收</text>
+    <text y="79" font-size="12.5" fill="#555">④ 请求体解析</text>
+    <text y="100" font-size="12.5" fill="#24406e" font-weight="600">⑤ Use 中间件（按注册顺序）</text>
+    <text y="121" font-size="12.5" fill="#555">⑥ 路由回调</text>
+
+    <line x1="0" y1="152" x2="30" y2="152" stroke="#b5562d" stroke-width="2.4"/>
+    <text x="40" y="157" font-size="13" fill="#b5562d" font-weight="600">返回顺序</text>
+    <text y="184" font-size="12.5" fill="#555">沿相反方向逐层返回，</text>
+    <text y="205" font-size="12.5" fill="#555">最终响应层组装并发送响应</text>
+
+    <text y="247" font-size="14" fill="#333" font-weight="600">中断</text>
+    <text y="272" font-size="12.5" fill="#555">任一层不调用 next(c)，</text>
+    <text y="293" font-size="12.5" fill="#555">内层不再执行，直接原路返回</text>
+
+    <text y="335" font-size="14" fill="#333" font-weight="600">按需执行</text>
+    <text y="360" font-size="12.5" fill="#555">中间件可限定分组、请求方法</text>
+    <text y="381" font-size="12.5" fill="#555">或请求命名，不匹配则跳过本层</text>
+
+    <rect x="-6" y="405" width="264" height="94" rx="5" fill="#f2f3f6" stroke="#ccd0da"/>
+    <text y="431" font-size="12" fill="#555" font-family="ui-monospace,Menlo,Consolas,monospace">async (c, next) =&gt; {</text>
+    <text y="451" font-size="12" fill="#2d6cb5" font-family="ui-monospace,Menlo,Consolas,monospace">  // 进入时执行</text>
+    <text y="471" font-size="12" fill="#555" font-family="ui-monospace,Menlo,Consolas,monospace">  await next(c)</text>
+    <text y="491" font-size="12" fill="#b5562d" font-family="ui-monospace,Menlo,Consolas,monospace">  // 返回时执行</text>
+  </g>
+</svg>

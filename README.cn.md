@@ -702,9 +702,9 @@ app.use(async (c, next) => {
 
 ```
 
-## topbit完整的流程图示
+## topbit 完整的中间件执行机制
 
-![](images/topbit-middleware.webp)
+![](images/topbit-middleware.svg)
 
 
 > **需要知道的是，其实在内部，body数据接收和解析也都是中间件，只是刻意安排了顺序，分出了pre和use接口。**

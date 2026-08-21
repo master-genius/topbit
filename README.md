@@ -673,9 +673,9 @@ app.use(async (c, next) => {
 // use can be cascaded: app.use(m1).use(m2)
 ```
 
-## Topbit Complete Flow Chart
+## Topbit Complete Middleware Execution Model
 
-![](images/topbit-middleware.webp)
+![](images/topbit-middleware-en.svg)
 
 > **It is important to know that internally, body data reception and parsing are also middleware. The order is deliberately arranged, separating `pre` and `use` interfaces.**
 
