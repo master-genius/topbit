@@ -860,9 +860,6 @@ Full configuration options for app initialization are as follows. Please read th
 
     debug     : false,
 
-    // Ignore trailing / in paths
-    ignoreSlash: true,
-
     // Enable request limiting
     useLimit: false,
 

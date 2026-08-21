@@ -164,7 +164,6 @@ class Topbit {
    * - fastParseQuery 快速解析querystring，默认为false，会把多个重名的解析为数组，true表示快速解析，不允许重复的名字，否则仅第一个生效。
    * - maxFormLength 在multipart/form-data类型提交数据时，单个form项的最大值，默认为1000000字节。
    * - errorHandle 收集错误并处理的函数，默认是输出错误信息，接收参数为两个，第一个是错误信息，第二个是错误的名字描述。
-   * - ignoreSlash 忽略末尾的/，默认为true。
    * - maxLoadRate 在自动创建子进程平衡负载模式，最大子进程负载率限制：0.15 ～ 0.98。
    * - streamTimeout http2Stream超时，若不设置，默认采用timeout的设置。
    */
@@ -221,7 +220,6 @@ class Topbit {
       loadInfoType  : 'text', // text | json | orgjson | --null
       loadInfoFile  : '',
   
-      ignoreSlash: true,
       parseBody: true,
   
       useLimit: false,
@@ -372,7 +370,6 @@ class Topbit {
         case 'daemon':
         case 'debug':
         case 'globalLog':
-        case 'ignoreSlash':
         case 'parseBody':
         case 'useLimit':
         case 'http2':

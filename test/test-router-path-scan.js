@@ -42,10 +42,10 @@ function check(desc, path, expect, method = 'GET') {
 check('连续斜杠开头 + 中间',    '///api/123///3324', { key: '/*', args: { starPath: '//api/123///3324' } });
 check('中间双斜杠不影响匹配',   '/api///user/345',   { key: '/api/user/:id', args: { id: '345' } });
 check('多处连续斜杠 + 参数',    '/a//b///c/x/e/z',   { key: '/a/:b/c/:d/e/:f', args: { b: 'b', d: 'x', f: 'z' } });
-// findRealPath 在 ignoreSlash 下会先去掉一个末尾斜杠，再进入匹配
-check('// 去尾斜杠后精确命中 /', '//',               { key: '/', args: {} });
-check('/// 无实际段落到 /*',     '///',              { key: '/*', args: { starPath: '/' } });
-check('首尾都有多余斜杠',        '//a//',            { key: '/*', args: { starPath: '/a/' } });
+// findRealPath 一律把末尾斜杠剥净（根路径 / 保留），不再有 ignoreSlash 配置
+check('// 剥净末尾斜杠后命中 /',  '//',              { key: '/', args: {} });
+check('/// 同样归一为 /',        '///',              { key: '/', args: {} });
+check('首尾都有多余斜杠',        '//a//',            { key: '/*', args: { starPath: '/a' } });
 
 // ---- starPath 取自原始路径，保留多余斜杠 ----
 check('星号余段保留原始形态',   '/static//a.css',    { key: '/static/*', args: { starPath: '/a.css' } });
@@ -76,7 +76,7 @@ check('14 段超出 maxDepth',     '/a/b/c/d/e/f/g/h/i/j/k/l/m/n', null);
 // 关键：多余斜杠不计入真实段数，40 个斜杠仍然只是 a/b/c 三段
 check('大量多余斜杠不计入段数',  '/a/b' + '/'.repeat(40) + 'c',
       { key: '/a/b/:c', args: { c: 'c' } });
-check('50 个斜杠无实际段',      '/'.repeat(50), { key: '/*', args: { starPath: '/'.repeat(48) } });
+check('50 个斜杠归一为根路径',   '/'.repeat(50), { key: '/', args: {} });
 
 console.log(`\ntest-router-path-scan: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);
 process.exit(failed === 0 ? 0 : 1);

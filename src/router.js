@@ -167,8 +167,6 @@ const SEG_E = new Int32Array(32);
 class Router {
 
   constructor(options = {}) {
-    this.ignoreSlash = true;
-
     this.maxPath = 1000;
 
     this.count = 0;
@@ -208,10 +206,6 @@ class Router {
     this.apiGroup = {};
 
     this.nameTable = {};
-
-    if (options.ignoreSlash !== undefined) {
-      this.ignoreSlash = options.ignoreSlash;
-    }
 
     this.path_preg = /^[a-z0-9_\-\/\:\*\.\@]{1,1000}$/i;
 
@@ -340,7 +334,8 @@ class Router {
     
     if (api_path[0] !== '/') { api_path = `/${api_path}`; }
 
-    if (api_path.length > 1 && api_path[api_path.length-1] == '/' && this.ignoreSlash) {
+    //末尾的/没有实际语义，注册路由时一律剥掉。
+    if (api_path.length > 1 && api_path[api_path.length-1] == '/') {
       api_path = api_path.substring(0, api_path.length-1);
     }
 
@@ -583,8 +578,11 @@ class Router {
     let start = 0;
     let plen = path.length;
 
+    let dcount = 0;
+
     for (let i = 0; i <= plen; i++) {
       if (i === plen || path.charCodeAt(i) === 47) {
+        dcount++;
         if (i > start) {
           if (n > this.maxDepth) return null;
           SEG_S[n] = start;
@@ -597,6 +595,25 @@ class Router {
 
     if (n > this.maxDepth) {
       return null;
+    }
+
+    /**
+     * 没有多余斜杠时，分隔符个数恰好等于段数+1；不等则说明路径里存在开头或中间的
+     * 多余斜杠（末尾的已在findRealPath剥净）。此时把它归一化后再查一次精确路由表，
+     * 使静态路由与参数/星号路由的斜杠容忍行为保持一致。
+     * n为0表示路径只有斜杠，findRealPath已归一为/并查过，无需重试。
+     */
+    if (dcount !== n + 1 && n > 0) {
+      let norm = '';
+      for (let i = 0; i < n; i++) {
+        norm += '/' + path.substring(SEG_S[i], SEG_E[i]);
+      }
+
+      let nmp = this.apiTable[method][norm];
+
+      if (nmp !== undefined && !nmp.isArgs && !nmp.isStar) {
+        return {args: {}, key: norm};
+      }
     }
 
     let next = 0;
@@ -682,8 +699,11 @@ class Router {
 
     let route_path = null;
 
-    if (this.ignoreSlash && plen > 1 && path[plen-1] === '/') {
-      path = path.substring(0, plen-1);
+    //末尾的/没有实际语义，一律一次剥净（不止剥一个），根路径/保留。
+    if (plen > 1 && path.charCodeAt(plen-1) === 47) {
+      let e = plen;
+      while (e > 1 && path.charCodeAt(e-1) === 47) e--;
+      path = path.substring(0, e);
     }
 
     let mp = this.apiTable[method][path];

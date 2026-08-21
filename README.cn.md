@@ -896,9 +896,6 @@ app.run(1234)
 
     debug     : false,
 
-    //忽略路径末尾的 /
-    ignoreSlash: true,
-
     //启用请求限制
     useLimit: false,
 
