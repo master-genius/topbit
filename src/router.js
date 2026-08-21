@@ -204,6 +204,21 @@ class Router {
       TRACE   : []
     };
 
+    /**
+     * 路由前缀索引。这是在 argsRoute 之上额外建立的查找加速结构，
+     * 不改变任何已解析的路由信息（routePath/routeArr/argsCount/starLength 等一律原样）。
+     * 作用是在线性扫描之前先按路径首段（必要时再按第二段）把不可能匹配的路由整批排除。
+     *
+     * argsIndex[method][首段] = { list, sub, subDyn }
+     *   list   —— 首段匹配该字面量的候选（含首段可通配的）
+     *   sub    —— 第二段字面量 -> 候选；未建二层时为 null
+     *   subDyn —— 第二段可通配的候选，供请求第二段未建子桶时使用
+     * argsDyn[method] —— 首段可通配的候选，供请求首段未建桶时使用
+     */
+    this.argsIndex = {};
+
+    this.argsDyn = {};
+
     this.methods = Object.keys(this.apiTable);
 
     //记录api的分组，只有在分组内的路径才会去处理，
@@ -461,7 +476,120 @@ class Router {
         return 0
       });
     }
+
+    this.buildArgsIndex();
   }
+
+  /**
+   * 构建路由前缀索引。只读取 argsRoute（已解析、已排序），不修改任何路由信息。
+   *
+   * 正确性依据：
+   *  1) 每个桶都按 argsRoute 的原顺序收集，因此是全局排序结果的子序列，
+   *     线性扫描取第一个匹配时，桶内结果与全表一致；
+   *  2) canMatch 只排除「该段位是静态字面量且与请求段不相等」的路由，
+   *     这类路由本来就不可能匹配，排除它们不改变任何结果。
+   *
+   * 分层判据（逐桶判定，不做全局一刀切）：
+   *  - 桶内条数 >= L2_MIN：太小的桶再切一刀省下的扫描抵不过多一次哈希查表；
+   *  - 第二段可通配的占比不超过一半：占比过高说明这一刀切不动，
+   *    细分后候选集几乎不减少，纯粹白付一次查表。
+   */
+  buildArgsIndex() {
+    const L2_MIN = 20;
+
+    this.argsIndex = {};
+    this.argsDyn = {};
+
+    //路由 r 的第 i 段能否匹配静态段 seg。段位超出路由长度、该位是参数或星号、
+    //字面量相等，三种都要保留（保守，绝不误排除）。
+    let canMatch = (r, i, seg) => {
+      let fp = r.routePath;
+
+      if (i >= fp.length) return true;
+
+      let e = fp[i];
+
+      return e.isArgs || e.isStar || e.path === seg;
+    };
+
+    //第 i 段可通配（参数、星号，或路由段数不足）
+    let isDyn = (r, i) => {
+      let fp = r.routePath;
+
+      return i >= fp.length || fp[i].isArgs || fp[i].isStar;
+    };
+
+    //list 中第 i 段出现过的静态字面量集合
+    let staticSegs = (list, i) => {
+      let out = Object.create(null);
+
+      for (let k = 0; k < list.length; k++) {
+        if (isDyn(list[k], i)) continue;
+        out[ list[k].routePath[i].path ] = true;
+      }
+
+      return out;
+    };
+
+    for (let m in this.argsRoute) {
+      let list = this.argsRoute[m];
+      let dyn = [];
+
+      for (let k = 0; k < list.length; k++) {
+        if (isDyn(list[k], 0)) dyn.push(list[k]);
+      }
+
+      let idx = Object.create(null);
+      let segs0 = staticSegs(list, 0);
+
+      for (let s0 in segs0) {
+        let l1 = [];
+
+        for (let k = 0; k < list.length; k++) {
+          if (canMatch(list[k], 0, s0)) l1.push(list[k]);
+        }
+
+        let sub = null;
+        let subDyn = null;
+
+        if (l1.length >= L2_MIN) {
+          let d1 = [];
+
+          for (let k = 0; k < l1.length; k++) {
+            if (isDyn(l1[k], 1)) d1.push(l1[k]);
+          }
+
+          //第二段可通配的占比超过一半，说明切不动，不建二层
+          if (d1.length * 2 <= l1.length) {
+            let segs1 = staticSegs(l1, 1);
+
+            sub = Object.create(null);
+            subDyn = d1;
+
+            for (let s1 in segs1) {
+              let l2 = [];
+
+              for (let k = 0; k < l1.length; k++) {
+                if (canMatch(l1[k], 1, s1)) l2.push(l1[k]);
+              }
+
+              sub[s1] = l2;
+            }
+          }
+        }
+
+        idx[s0] = {
+          list: l1,
+          sub: sub,
+          subDyn: subDyn
+        };
+      }
+
+      this.argsIndex[m] = idx;
+      this.argsDyn[m] = dyn;
+    }
+  }
+
 
   /**
    * 
@@ -625,7 +753,39 @@ class Router {
     let next = 0;
     let args = {};
     let r = null;
-    let margs = this.argsRoute[method];
+    /**
+     * 按首段（必要时再按第二段）取候选桶，把不可能匹配的路由整批排除。
+     * 段0与段1在后续比较中本来就要物化，这里复用 SEG_BUF，不额外产生子串。
+     * argsIndex 由 argsRouteSort 构建；调用方未调用它时回退到全量数组，行为不变。
+     */
+    let margs;
+    let aidx = this.argsIndex[method];
+
+    if (n > 0 && aidx !== undefined) {
+      if (matz === 0) {
+        SEG_BUF[0] = path.substring(SEG_S[0], SEG_E[0]);
+        matz = 1;
+      }
+
+      let node = aidx[ SEG_BUF[0] ];
+
+      if (node === undefined) {
+        margs = this.argsDyn[method];
+      } else if (node.sub !== null && n > 1) {
+        if (matz < 2) {
+          SEG_BUF[1] = path.substring(SEG_S[1], SEG_E[1]);
+          matz = 2;
+        }
+
+        let l2 = node.sub[ SEG_BUF[1] ];
+
+        margs = l2 === undefined ? node.subDyn : l2;
+      } else {
+        margs = node.list;
+      }
+    } else {
+      margs = this.argsRoute[method];
+    }
     let alength = margs.length;
     let cur_path;
     let path_split_max = n + 1;
