@@ -185,6 +185,12 @@ let Http2Proxy = function (options = {}) {
   // 初始化时告知的服务端口，用于自动拼接 hostProxy 的 key；'' 或 0 表示不拼接
   this.port = ''
 
+  // default_server：host 未命中时的回退目标。
+  // defaultServer 保存用户原始配置值，defaultHost 是归一化并校验后的 hostProxy key。
+  this.defaultServer = ''
+
+  this.defaultHost = null
+
   this.config = {}
 
   this.connectOptions = {
@@ -233,6 +239,14 @@ let Http2Proxy = function (options = {}) {
         }
         break
 
+      case 'defaultServer':
+        if (typeof options[k] === 'string') {
+          this.defaultServer = options[k]
+        } else {
+          console.error(`defaultServer 必须是字符串: ${options[k]}`)
+        }
+        break
+
       case 'port':
         // '' 和 0 表示不拼接；其他必须为 1~65535
         if (options[k] === '' || options[k] === 0 || options[k] === '0') {
@@ -255,6 +269,27 @@ let Http2Proxy = function (options = {}) {
   }
 
   this.setHostProxy(this.config)
+
+  // defaultServer 归一化：c.host 与 hostProxy 的 key 都是纯 host[:port]，不含协议前缀
+  // （Host 头 / :authority 按 RFC 无 scheme），因此容错用户写成 URL 的情况，
+  // 削掉 scheme 与 path 后再校验是否真的存在于配置中。必须放在 setHostProxy 之后。
+  if (this.defaultServer) {
+    let d = this.defaultServer.replace(/^https?:\/\//, '')
+                              .replace(/\/.*$/, '')
+                              .trim()
+
+    // setHostProxy 会按 this.port 改写配置 key（非 80/443 时裸 key 变为 host:port），
+    // defaultServer 允许用户按 config 里的写法给裸 host，故先查原样、再查补端口的形式。
+    if (d.length === 0) {
+      console.error(`defaultServer: ${this.defaultServer} 格式错误，已忽略`)
+    } else if (this.hostProxy[d] !== undefined) {
+      this.defaultHost = d
+    } else if (this.port !== '' && this.hostProxy[`${d}:${this.port}`] !== undefined) {
+      this.defaultHost = `${d}:${this.port}`
+    } else {
+      console.error(`defaultServer: ${this.defaultServer} 不在 host 配置中，已忽略`)
+    }
+  }
 
 }
 
@@ -573,6 +608,13 @@ Http2Proxy.prototype.mid = function () {
 
   return async (c, next) => {
     let host = c.host
+
+    // host 未命中时回退到 default_server。路由未命中不回退——那是"该 server 块里
+    // 没有这条 location"，与 nginx 的 server → location 两级匹配一致。
+    // 注意未命中后走 next()，会落到 init() 注册的空 handler（空响应），不是 404。
+    if (!self.hostProxy[host] && self.defaultHost !== null) {
+      host = self.defaultHost
+    }
 
     if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
       if (self.full) {

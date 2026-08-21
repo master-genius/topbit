@@ -38,7 +38,8 @@ const zipdata = require('./lib/zipdata.js')
 const ErrorLog = require('./lib/errorlog.js')
 const Balancer = require('./lib/balancer.js')
 
-let __instance__ = 0;
+//一个进程只能有一个cluster管理者，daemon()中检测。
+let __cluster_owner__ = false;
 
 let _topbit_server_running = `
 :.:.:.:.:\x1b[34;5m.\x1b[0m:\x1b[36;5m.\x1b[0m topbit in service \x1b[36;5m.\x1b[0m:\x1b[34;5m.\x1b[0m:.:.:.:.:
@@ -168,11 +169,6 @@ class Topbit {
    * - streamTimeout http2Stream超时，若不设置，默认采用timeout的设置。
    */
   constructor(options={}) {
-    if (__instance__ > 0)
-      throw new Error('topbit遵循单例模式，不能构造多次。你可以在多进程或多线程中构造新的实例。');
-
-    __instance__ += 1;
-
     this._is_listening = false;
     this._is_daemon_listening = false;
   
@@ -1237,6 +1233,22 @@ class Topbit {
   */
   daemon(port=2368, host='0.0.0.0', num=0) {
     if (this._is_daemon_listening) return this;
+
+    /**
+     * cluster的进程管理是进程级独占资源：cluster.on('message')、cluster.on('exit')
+     * 和process.on('SIGCHLD')都只能有一套，多套会互相误判并杀掉对方的worker。
+     * worker分支只是转发到run()，不注册任何cluster状态，因此不检测。
+     */
+    if (cluster.isPrimary || cluster.isMaster) {
+      if (__cluster_owner__) {
+        throw new Error(
+          '一个进程只能有一个topbit实例调用daemon()。\n'
+          + '若需在一个进程内监听多个端口，请构造多个实例并各自调用run()。'
+        );
+      }
+
+      __cluster_owner__ = true;
+    }
 
     if (typeof host === 'number') {
       num = host;
