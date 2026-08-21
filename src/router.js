@@ -156,6 +156,14 @@ function router_group(grp_name, callback, app=null, prefix=true, createApp, deep
   return route
 }
 
+/**
+ * findPath 的段位置缓冲。findPath 全程同步、不重入（从 http1 的 onRequest 一路
+ * 同步调下来，中间没有 await 也没有用户代码），因此模块级复用是安全的。
+ * 长度必须大于 maxDepth，否则填充时的越界守卫会误判。
+ */
+const SEG_S = new Int32Array(32);
+const SEG_E = new Int32Array(32);
+
 class Router {
 
   constructor(options = {}) {
@@ -566,8 +574,28 @@ class Router {
       return null;
     }
 
-    let path_split = path.split('/').filter(p => p.length > 0);
-    if (path_split.length > this.maxDepth) {
+    /**
+     * 一遍扫描记录每一段的起止位置：只有 i > start 才记录，所以连续的 / 天然被
+     * 跳过，不需要 filter。静态段随后用 startsWith 就地比对，完全不物化子串；
+     * 只有确实是参数的段才 slice 出来。
+     */
+    let n = 0;
+    let start = 0;
+    let plen = path.length;
+
+    for (let i = 0; i <= plen; i++) {
+      if (i === plen || path.charCodeAt(i) === 47) {
+        if (i > start) {
+          if (n > this.maxDepth) return null;
+          SEG_S[n] = start;
+          SEG_E[n] = i;
+          n++;
+        }
+        start = i + 1;
+      }
+    }
+
+    if (n > this.maxDepth) {
       return null;
     }
 
@@ -577,12 +605,12 @@ class Router {
     let margs = this.argsRoute[method];
     let alength = margs.length;
     let cur_path;
-    let path_split_max = path_split.length + 1;
+    let path_split_max = n + 1;
 
     for (let i=0; i < alength; i++) {
       r = margs[i];
 
-      if ( (r.routePath.length !== path_split.length && r.isStar===false)
+      if ( (r.routePath.length !== n && r.isStar===false)
         || (r.isStar && r.routePath.length > path_split_max) )
       {
         continue;
@@ -593,7 +621,10 @@ class Router {
       if (r.isStar) {
         for (let i = 0; i < r.routePath.length; i++) {
           cur_path = r.routePath[i];
-          if(!cur_path.isStar && cur_path.path !== path_split[i]) {
+          if (cur_path.isStar) continue;
+          if (SEG_E[i] - SEG_S[i] !== cur_path.path.length
+            || !path.startsWith(cur_path.path, SEG_S[i]))
+          {
             next = true;
             break;
           }
@@ -606,7 +637,10 @@ class Router {
       } else {
         for(let i=0; i < r.routePath.length; i++) {
           cur_path = r.routePath[i];
-          if (!cur_path.isArgs && cur_path.path !== path_split[i]) {
+          if (cur_path.isArgs) continue;
+          if (SEG_E[i] - SEG_S[i] !== cur_path.path.length
+            || !path.startsWith(cur_path.path, SEG_S[i]))
+          {
             next = true;
             break;
           }
@@ -616,7 +650,7 @@ class Router {
           for (let i=0; i < r.routePath.length; i++) {
             cur_path = r.routePath[i];
             if (cur_path.isArgs) {
-              args[ cur_path.name ] = path_split[i];
+              args[ cur_path.name ] = path.slice(SEG_S[i], SEG_E[i]);
             }
           }
         }

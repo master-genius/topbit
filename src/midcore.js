@@ -21,9 +21,11 @@ class MidCore {
     this.midGroup = Object.create(null);
 
     this.midGroup[ this.globalKey ] = [
-      async (ctx) => {
+      //纯转发，调用后无操作，因此不需要async：直接把回调的promise透传给调用方，
+      //省掉一层promise与一次async帧挂起。路由回调被强制为async，不会同步抛异常。
+      (ctx) => {
         if (typeof ctx.requestCall === 'function') {
-          return await ctx.requestCall(ctx);
+          return ctx.requestCall(ctx);
         }
       }
     ];
@@ -139,11 +141,22 @@ class MidCore {
     }
 
     let self = this;
+    /**
+     * 包装层只负责绑定nextcall与做method/name过滤，调用midcall之后不再有任何操作，
+     * 因此不需要声明为async——直接返回midcall的promise即可，语义与async包装完全等价
+     * （调用方一律是await）。这样每层中间件省掉一个promise与一次async帧挂起/恢复。
+     *
+     * 安全性依据：add()与router.addPath都强制回调必须是AsyncFunction，而async函数
+     * （包括bind之后的）永不同步抛异常，只返回rejected promise，所以去掉async包装
+     * 不会让异常绕过Middleware.run的try/catch。
+     *
+     * 需要在await之后继续处理的中间件（如addFinal的fr）仍然必须是async，不在此列。
+     */
     let makeRealMid = (prev_mid, grp) => {
       let nextcall = self.midGroup[grp][prev_mid];
 
       if (!method && !pathname) {
-        return async (ctx) => { return await midcall(ctx, nextcall); };
+        return (ctx) => midcall(ctx, nextcall);
       }
 
       let methodTable = null;
@@ -153,31 +166,31 @@ class MidCore {
       pathname && (nameTable = {}) && pathname.forEach(a => { nameTable[a] = true; });
 
       if (methodTable && !nameTable) {
-        return async (ctx) => {
+        return (ctx) => {
           if (!methodTable[ctx.method]) {
-            return await nextcall(ctx);
+            return nextcall(ctx);
           }
   
-          return await midcall(ctx, nextcall);
+          return midcall(ctx, nextcall);
         }
       }
 
       if (!methodTable && nameTable) {
-        return async (ctx) => {
+        return (ctx) => {
           if (!nameTable[ctx.name]) {
-            return await nextcall(ctx);
+            return nextcall(ctx);
           }
 
-          return await midcall(ctx, nextcall);
+          return midcall(ctx, nextcall);
         }
       }
 
-      return async (ctx) => {
+      return (ctx) => {
         if (!methodTable[ctx.method] || !nameTable[ctx.name]) {
-          return await nextcall(ctx);
+          return nextcall(ctx);
         }
 
-        return await midcall(ctx, nextcall);
+        return midcall(ctx, nextcall);
       };
     };
 
