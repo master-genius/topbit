@@ -8,6 +8,7 @@
 
 const assert = require('node:assert');
 const Topbit = require('../src/topbit.js');
+const Router = require('../src/router.js');
 
 const app = new Topbit();
 
@@ -90,6 +91,25 @@ check('排序：星号按静态前缀长度降序',
 check('排序：参数路由按参数个数升序',
   idx('/q/a/b/:x') < idx('/q/a/:y/:x') && idx('/q/a/:y/:x') < idx('/q/:z/:y/:x'),
   true);
+
+// ---- 参数命名限制 ----
+{
+  const r2 = new Router();
+  let threw = false;
+  try { r2.addPath('/x/:__proto__', 'GET', async c => {}); } catch (e) { threw = /__proto__/.test(e.message); }
+  check('参数名 __proto__ 在注册阶段抛错', threw, true);
+
+  let threw2 = false;
+  try { r2.addPath('/y/:a/:__proto__/:b', 'GET', async c => {}); } catch (e) { threw2 = /__proto__/.test(e.message); }
+  check('__proto__ 出现在中间位置同样抛错', threw2, true);
+
+  let ok3 = true;
+  try { r2.addPath('/z/:constructor/:toString', 'GET', async c => {}); } catch (e) { ok3 = false; }
+  check('其余原型键（constructor/toString）不受限制', ok3, true);
+  r2.argsRouteSort();
+  check('其余原型键可正常取值',
+    r2.findRealPath('/z/AA/BB', 'GET').args, { constructor: 'AA', toString: 'BB' });
+}
 
 console.log(`\ntest-route-order: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);
 process.exit(failed === 0 ? 0 : 1);

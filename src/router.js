@@ -157,8 +157,24 @@ function router_group(grp_name, callback, app=null, prefix=true, createApp, deep
 }
 
 /**
- * findPath 的段位置缓冲。findPath 全程同步、不重入（从 http1 的 onRequest 一路
- * 同步调下来，中间没有 await 也没有用户代码），因此模块级复用是安全的。
+ * findPath 的段位置与段字符串缓冲。
+ *
+ * 为什么模块级共享是安全的：findPath 全程同步、不重入。从 onRequest 一路同步调
+ * 下来，中间只有 substring、属性读取与字符串比较，没有任何能让出执行权的地方。
+ * 主线程一次只执行一个事件循环回调，因此哪怕监听多个端口、有多个 Router 实例、
+ * 大量并发连接，findPath 的调用也是严格串行的——「写入到用完」这段窗口对其他
+ * 所有 JS 代码都是原子的。
+ *
+ * 维护警示：安全性依赖「扫描到使用之间不让出执行权」，而不是实例之间的隔离。
+ * 以下改动会直接破坏它：
+ *   - 在 findPath 内引入 await 或任何异步；
+ *   - 让扫描与使用之间能触发用户代码（例如把索引桶换成带 getter 的普通对象，
+ *     或允许外部往桶里注入对象）；
+ *   - 把缓冲槽位本身（而非其中的字符串值）放进返回结果——那会让先前请求拿到的
+ *     结果被后续请求覆写。
+ * 注意前两条即使把缓冲改成实例属性也挡不住：同一实例的并发请求照样互相覆写。
+ * 相关验证见 test/test-router-concurrency.js。
+ *
  * 长度必须大于 maxDepth，否则填充时的越界守卫会误判。
  */
 const SEG_S = new Int32Array(32);
@@ -308,6 +324,18 @@ class Router {
 
         if (p.routeArr[i].length < 2) {
           throw new Error(`${path} : 参数不能没有名称，请在:后添加名称`);
+        }
+
+        /**
+         * 参数最终写入 ctx.param（普通对象），而 __proto__ 是 Object.prototype 上的
+         * 访问器，赋值会走原型 setter 而非创建自有属性，该参数会静默丢值。
+         * 与其运行期出现「参数取不到值」这种难查的怪问题，不如注册阶段直接拒绝。
+         * 其余原型键（constructor、toString 等）都是可写数据属性，赋值会创建自有
+         * 属性正常覆盖，不受影响，无需限制。
+         */
+        if (t.name === '__proto__') {
+          console.error(`\x1b[7;31;47mError: ${method} ${path} 参数不能命名为 __proto__ \x1b[0m\n`);
+          throw new Error(`${path} : 参数不能命名为 __proto__`);
         }
 
         if (t.isArgs) p.argsCount++;

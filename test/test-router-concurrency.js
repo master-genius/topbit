@@ -40,9 +40,10 @@ function mkApp(tag) {
     c.data = `${tag}|re|${before}|${c.param.a}|${inner.args.a}${inner.args.b}${inner.args.c}`;
   });
 
-  // 参数名为原型键，验证不会污染原型也不会误判
-  app.get('/proto/:__proto__/:constructor', async c => {
-    c.data = `${tag}|proto|${typeof c.param.__proto__}|${c.param.constructor}`;
+  // 参数名为原型键：__proto__ 在注册阶段已被拒绝（见下方用例），
+  // constructor 是 Object.prototype 上的可写数据属性，赋值会创建自有属性，可正常使用
+  app.get('/proto/:constructor', async c => {
+    c.data = `${tag}|proto|${c.param.constructor}`;
   });
 
   return app;
@@ -76,7 +77,7 @@ function cases(port, tag, i) {
     [`/n/a/b/c`,                    `${tag}|nested`],
     [`//n///a//b////c`,             `${tag}|nested`],
     [`/re/r${i}`,                   `${tag}|re|r${i}|r${i}|QQWWEE`],
-    [`/proto/x${i}/y${i}`,          `${tag}|proto|object|y${i}`]
+    [`/proto/y${i}`,                `${tag}|proto|y${i}`]
   ].map(([p, e]) => ({ port, path: p, expect: e }));
 }
 
@@ -121,10 +122,21 @@ setTimeout(async () => {
   ok(`并发 ${CONC}、两实例交错、共 ${all.length} 个请求全部返回正确结果`, bad === 0,
      bad ? `${bad} 个错误，首个：${firstBad}` : null);
 
-  // ============ 二、原型未被污染 ============
-  ok('参数名为 __proto__ 不污染 Object.prototype', ({}).x === undefined && Object.prototype.x === undefined);
+  // ============ 二、原型键安全 ============
+  {
+    //__proto__ 作为参数名在注册阶段拒绝：ctx.param 是普通对象，赋值会触发原型 setter
+    //导致该参数静默丢值，与其运行期出怪问题不如注册时报错
+    const t = new Topbit({ parseBody: false });
+    let threw = false;
+    try { t.get('/x/:__proto__', async c => {}); } catch (e) { threw = /__proto__/.test(e.message); }
+    ok('参数名为 __proto__ 在注册阶段被拒绝', threw);
+
+    let threw2 = false;
+    try { t.get('/y/:constructor', async c => {}); } catch (e) { threw2 = true; }
+    ok('参数名为 constructor 仍然允许', threw2 === false);
+  }
   const probe = {};
-  ok('参数名为 constructor 不改写原型链', probe.constructor === Object);
+  ok('原型链未被改写', probe.constructor === Object && ({}).x === undefined);
 
   // ============ 三、缓冲区内容不逃逸：结果在后续调用后仍然正确 ============
   {
