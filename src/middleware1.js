@@ -13,7 +13,9 @@ class Middleware extends MidCore {
    */
   async run(ctx) {
     try {
-      await this.exec(ctx, ctx.group);
+      //return await：把中间件链的返回值透传出去，同时保留 try/catch 捕获链上的异常。
+      //若写成 return this.exec(...)，rejection 会绕过本层 catch。
+      return await this.exec(ctx, ctx.group);
     } catch (err) {
       this.errorHandle(err, '--ERR-res--');
       try {

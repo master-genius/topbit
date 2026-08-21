@@ -219,6 +219,15 @@ class Router {
 
     this.argsDyn = {};
 
+    /**
+     * 静态路由段树。仅收录无参数无星号的路由，逐段建节点，节点上的 r 记录终点路径。
+     * 用途：路径含开头/中间多余斜杠时，精确表查不到（键里带着多余的 /），需要判断
+     * 归一化后是否命中静态路由。用段树可以逐段下行、任一层不存在立即返回，全程复用
+     * 已扫描出的段位置，不需要把归一化路径拼接成字符串——而拼接的代价恰恰花在
+     * 「确认不存在」上，那正是绝大多数情况。
+     */
+    this.staticTree = {};
+
     this.methods = Object.keys(this.apiTable);
 
     //记录api的分组，只有在分组内的路径才会去处理，
@@ -478,6 +487,52 @@ class Router {
     }
 
     this.buildArgsIndex();
+
+    this.buildStaticTree();
+  }
+
+  /**
+   * 构建静态路由段树。只读取 apiTable，不修改任何路由信息。
+   * 节点形如 { c: 子节点表, r: 终点路径 }，r 非 null 表示该节点是一条静态路由的终点。
+   */
+  buildStaticTree() {
+    this.staticTree = {};
+
+    for (let m in this.apiTable) {
+      let root = Object.create(null);
+
+      for (let p in this.apiTable[m]) {
+        let rc = this.apiTable[m][p];
+
+        //参数与星号路由不进静态树
+        if (rc.isArgs || rc.isStar) continue;
+
+        let node = root;
+        let cur = null;
+        let start = 0;
+
+        for (let i = 0; i <= p.length; i++) {
+          if (i !== p.length && p.charCodeAt(i) !== 47) continue;
+
+          if (i > start) {
+            let seg = p.substring(start, i);
+
+            if (node[seg] === undefined) {
+              node[seg] = { c: Object.create(null), r: null };
+            }
+
+            cur = node[seg];
+            node = cur.c;
+          }
+
+          start = i + 1;
+        }
+
+        if (cur !== null) cur.r = p;
+      }
+
+      this.staticTree[m] = root;
+    }
   }
 
   /**
@@ -670,6 +725,12 @@ class Router {
     }
     this.apiGroup = {};
     this.nameTable = {};
+
+    //索引结构持有全部路由对象的引用，daemon 的 primary 分支调用 clear() 释放内存时
+    //必须一并清掉，否则这些引用会让整张路由表在 master 进程里活着。
+    this.argsIndex = {};
+    this.argsDyn = {};
+    this.staticTree = {};
   }
 
   /** 
@@ -736,20 +797,32 @@ class Router {
      * 使静态路由与参数/星号路由的斜杠容忍行为保持一致。
      * n为0表示路径只有斜杠，findRealPath已归一为/并查过，无需重试。
      */
-    if (dcount !== n + 1 && n > 0) {
-      let norm = '';
-      for (let i = 0; i < n; i++) {
-        norm += '/' + path.substring(SEG_S[i], SEG_E[i]);
+    let matz = 0;                 //SEG_BUF 已物化到的段下标
+
+    if (dcount !== n + 1 && n > 0 && this.staticTree[method] !== undefined) {
+      let node = this.staticTree[method];
+      let cur = null;
+      let i = 0;
+
+      for (; i < n; i++) {
+        if (matz <= i) {
+          SEG_BUF[matz] = path.substring(SEG_S[matz], SEG_E[matz]);
+          matz++;
+        }
+
+        cur = node[ SEG_BUF[i] ];
+
+        if (cur === undefined) break;
+
+        node = cur.c;
       }
 
-      let nmp = this.apiTable[method][norm];
-
-      if (nmp !== undefined && !nmp.isArgs && !nmp.isStar) {
-        return {args: {}, key: norm};
+      //走完全部段且该节点是终点，才说明归一化后确实命中一条静态路由
+      if (i === n && cur !== null && cur.r !== null) {
+        return {args: {}, key: cur.r};
       }
     }
 
-    let matz = 0;                 //SEG_BUF 已物化到的段下标
     let next = 0;
     let args = {};
     let r = null;

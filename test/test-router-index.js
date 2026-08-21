@@ -209,5 +209,53 @@ const paths = list => list.map(x => x.path);
   check(`大规模随机差分（${total} 次，有索引 vs 无索引结果一致）`, diffBad, 0);
 }
 
+// ============ 六、静态路由段树 ============
+{
+  const R = build([
+    ['GET', '/api/t'], ['GET', '/api/user/list'], ['GET', '/health'],
+    ['GET', '/api/:id'], ['GET', '/static/*'], ['POST', '/api/t']
+  ]);
+
+  const t = R.staticTree.GET;
+  check('段树只收录静态路由的首段', Object.keys(t).sort(), ['api', 'health']);
+  check('参数路由不进段树', t['api'].c[':id'], undefined);
+  check('星号路由不进段树', t['static'], undefined);
+  check('中间节点不是终点', t['api'].r, null);
+  check('叶子节点记录终点路径', t['api'].c['t'].r, '/api/t');
+  check('多级静态路由逐层建节点', t['api'].c['user'].c['list'].r, '/api/user/list');
+  check('单段静态路由', t['health'].r, '/health');
+  check('方法隔离', Object.keys(R.staticTree.POST).sort(), ['api']);
+
+  // 端到端：多余斜杠下静态路由命中，且优先于参数路由
+  check('开头多斜杠命中静态路由', R.findRealPath('//api//t', 'GET').key, '/api/t');
+  check('中间多斜杠命中多级静态路由', R.findRealPath('/api///user///list', 'GET').key, '/api/user/list');
+  check('段树未命中时正常落到参数路由', R.findRealPath('/api//zzz', 'GET').key, '/api/:id');
+  check('段树未命中且无参数路由时落到兜底', R.findRealPath('//static//a//b', 'GET').key, '/static/*');
+  check('POST 不会命中 GET 的静态树', R.findRealPath('//api//user//list', 'POST'), null);
+
+  // 前缀存在但不是终点，不能误判为命中
+  const R2 = build([['GET', '/a/b/c'], ['GET', '/*']]);
+  check('前缀存在但非终点不算命中', R2.findRealPath('//a//b', 'GET').key, '/*');
+  check('完整路径为终点才算命中', R2.findRealPath('//a//b//c', 'GET').key, '/a/b/c');
+
+  // 段树未命中后仍按原有优先级走参数路由
+  const R3 = build([['GET', '/a/b/c'], ['GET', '/a/:x'], ['GET', '/*']]);
+  check('前缀非终点时落到参数路由', R3.findRealPath('//a//b', 'GET').key, '/a/:x');
+  check('终点存在时静态优先于参数', R3.findRealPath('//a//b//c', 'GET').key, '/a/b/c');
+}
+
+// ============ 七、clear() 释放索引引用 ============
+{
+  const R = build([['GET', '/api/t'], ['GET', '/api/:id'], ['GET', '/*']]);
+  check('clear 前索引已建立',
+    Object.keys(R.argsIndex).length > 0 && Object.keys(R.staticTree).length > 0, true);
+
+  R.clear();
+  check('clear 后 argsIndex 已清空', Object.keys(R.argsIndex).length, 0);
+  check('clear 后 argsDyn 已清空', Object.keys(R.argsDyn).length, 0);
+  check('clear 后 staticTree 已清空', Object.keys(R.staticTree).length, 0);
+  check('clear 后查找不抛错并返回 null', R.findRealPath('/api/t', 'GET'), null);
+}
+
 console.log(`\ntest-router-index: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);
 process.exit(failed === 0 ? 0 : 1);
