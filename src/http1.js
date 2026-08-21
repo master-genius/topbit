@@ -99,9 +99,24 @@ class Http1 {
       let rt = self.router.findRealPath(urlobj.path, req.method);
       if (rt === null) {
         res.statusCode = 404;
+
+        /**
+         * 404 不进入中间件链，maxBody 无从生效。此时若请求体尚未被消费完，Node 会把
+         * 它整个排空——实测声明 20MB 的 POST 会被完整收下——攻击者用不存在的路径即可
+         * 让服务端白吞任意流量，故必须断开。
+         *
+         * 反之（无请求体的 GET/HEAD/DELETE 等）保持 Node 的 keep-alive 语义，不要打断
+         * 合法客户端的连接复用：原先无条件销毁会让一次 404 之后的同连接请求全部失败。
+         *
+         * req.complete 表示报文是否已完整接收并解析，与请求方法无关，带 body 的 GET
+         * 同样为 false，因此不需要按方法列表判断。但它必须在 end 回调里读：Node 在
+         * on_headers_complete 就派发 request 事件，on_message_complete 在其后，
+         * handler 入口处恒为 false，在那里判会退化成无条件销毁。
+         */
         res.end(self.config.notFound, () => {
-          !req.destroyed && req.destroy();
+          if (!req.complete && !req.destroyed) req.destroy();
         });
+
         return ;
       }
 

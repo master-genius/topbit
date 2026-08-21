@@ -24,8 +24,8 @@ if (cluster.isWorker) {
 // ---- 场景 2：多个实例各自 run() 不同端口，互不干扰 ----
 a.get('/', async ctx => ctx.text('from-a'));
 b.get('/', async ctx => ctx.text('from-b'));
-a.run(39401);
-b.run(39402);
+a.run(43401);
+b.run(43402);
 
 function get(port, cb) {
   http.get({ host: '127.0.0.1', port, path: '/' }, res => {
@@ -36,20 +36,20 @@ function get(port, cb) {
 }
 
 setTimeout(() => {
-  get(39401, ra => {
-    get(39402, rb => {
+  get(43401, ra => {
+    get(43402, rb => {
       assert.strictEqual(ra, 'from-a', '实例 a 应返回自己的内容');
       assert.strictEqual(rb, 'from-b', '实例 b 应返回自己的内容');
       console.log('PASS 两个实例各自 run() 不同端口，互不干扰');
 
       // ---- 场景 3：第二个 daemon() 抛错 ----
       c.get('/', async ctx => ctx.text('from-c'));
-      c.daemon(39403, 1);   // 第 1 个 daemon：primary 分支，fork 1 个 worker
+      c.daemon(43403, 1);   // 第 1 个 daemon：primary 分支，fork 1 个 worker
 
       const d = new Topbit({ parseBody: false });
 
       assert.throws(
-        () => d.daemon(39404, 1),
+        () => d.daemon(43404, 1),
         /一个进程只能有一个topbit实例调用daemon/,
         '第二个 daemon() 应抛错'
       );
