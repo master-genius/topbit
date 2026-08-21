@@ -1867,6 +1867,84 @@ app.run(1234)
 
 ```
 
+**路径匹配与跨 host 降级：**
+
+配置里的 `path` 会被规范成前缀路由：`/api` → `/api/*`，`/` → `/*`（含 `/:` 的参数路由保持原样）。所有 host 的 path 合并成一张全局路由表注册到框架，同一条 path 只注册一次，多个 host 声明同一 path 不会冲突。
+
+由于路由匹配发生在中间件之前、且不感知 Host，框架给出的 `c.routepath` 是**全局最具体**的那一条，未必是当前 host 自己声明过的。代理会自动把它**降级**到该 host 声明过的最长前缀：
+
+```javascript
+const pxy = new Proxy({
+    port: 443,
+    config: {
+        'a.com': [
+            { path: '/api',    url: 'http://127.0.0.1:8001' },
+            { path: '/static', url: 'http://127.0.0.1:8002' }
+        ],
+        'b.com': [{ path: '/',       url: 'http://127.0.0.1:8003' }],
+        'c.com': [{ path: '/api/v2', url: 'http://127.0.0.1:8004' }]
+    }
+})
+```
+
+| 请求 | 匹配到的 routepath | 降级结果 | 转发到 |
+|---|---|---|---|
+| `a.com/api/x` | `/api/*` | 直接命中 | a 的 `/api` 后端 |
+| `a.com/api/v2/x` | `/api/v2/*` | → `/api/*` | a 的 `/api` 后端 |
+| `a.com/other` | `/*` | 无可降级 | 未命中 |
+| `b.com/api/v2/x` | `/api/v2/*` | → `/*` | b 的 `/` 后端，路径 `/api/v2/x` 完整转发 |
+| `c.com/api/x` | `/api/*` | 无可降级 | 未命中 |
+
+降级规则：
+
+- 降级映射在 `init()` 时一次性算好，运行时只做一次哈希查找。
+- **只对代理自己注册的 path 降级**，应用自有的业务路由（如 `app.get('/admin/:id')`）不在其中，不会被代理吞掉。
+- **只降到该 host 已声明过的 path**，不会凭空产生后端。
+- 降不下去就是未命中，按未命中流程处理。
+- 降级后 `c.routepath` 会被改写成实际执行的那一条，后续中间件读到的是真实值。
+- 参数路由（不以 `/*` 结尾）不参与降级。
+
+**defaultServer（默认 host）：**
+
+指定请求 Host 未匹配到任何配置时的回退目标，典型用途是把访问已下线域名的流量统一导到某个域名。
+
+```javascript
+const pxy = new Proxy({
+    port: 443,
+    defaultServer: 'main.com',       // 也可以写 'https://main.com'，会自动削掉协议前缀
+    config: {
+        'a.com'   : 'http://127.0.0.1:8001',
+        'main.com': 'http://127.0.0.1:8009'
+    }
+})
+```
+
+- 取值是 **host 名**，不是 URL。写成 `'https://main.com/x'` 这类形式会自动削掉协议前缀与路径，只取 `main.com`。
+- 与 `port` 选项配合：可以按 `config` 里的写法给裸 host，代理会自动补端口后再匹配。
+- 归一化后若不在 `config` 中，控制台告警并忽略，行为退回未配置状态。
+- **只在 Host 未命中时回退**。Host 命中、但该 host 下没有对应路径时不会回退（那属于"这个域名下没有这条路径"）。
+- 回退发生在路径降级之前，所以回退目标 host 同样享受路径降级。
+- 无 Host 头的 HTTP/1.0 请求也会被 `defaultServer` 接住。
+
+**未命中的处理：**
+
+代理未命中（Host 或路径都没匹配上）时会调用 `next()`，把请求交还给中间件链。`init()` 为代理注册的路由挂在分组 `topbit_proxy` 下，向该分组添加中间件即可自定义未命中的响应：
+
+```javascript
+// Proxy / ProxyNoAgent / Http2Proxy 三者通用
+app.use(async (c, next) => {
+    return c.status(404).html('<h1>404 Not Found</h1>')
+}, '@topbit_proxy')
+```
+
+该中间件的三个特性：
+
+- 排在代理中间件的**下游**，代理命中时不会执行。
+- 只对代理注册的路径生效，**不影响应用自有的路由**。
+- 与 `defaultServer` 正交：Host 未命中先由 `defaultServer` 接管，Host 命中但路径未命中才落到这里。
+
+若开启了 `full` 模式且未配置 `defaultServer`，未命中会直接返回 502 而不是 `next()`。
+
 **负载均衡配置：**
 通过配置数组实现，支持权重 (`weight`) 和存活检测。
 
@@ -1894,7 +1972,6 @@ let load_balance_cfg = {
 
 const pxy = new Proxy({
     timeout: 10000,
-    starPath : true, // 开启后将代理路径后的字符串作为路径转发
     config: load_balance_cfg
 })
 
@@ -1932,7 +2009,48 @@ const pxy = new Proxy({
 pxy.init(app)
 ```
 
-**关于 `ProxyNoAgent`：** 扩展中还提供了 `ProxyNoAgent`，用法与 `Proxy` 完全一致，区别是不为每个后端维护独立的 `http(s).Agent`，而是走全局 Agent。
+**构造选项完整列表：**
+
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| `config` / `host` | `{}` | 代理配置表，key 为 host，value 为字符串、对象或对象数组 |
+| `port` | `''` | 服务监听端口，用于自动拼接 config 的 key，见上文 |
+| `defaultServer` | `''` | Host 未命中时的回退目标 host，见上文 |
+| `timeout` | `35000` | 单次后端请求的超时（毫秒），可被后端配置项 `timeout` 覆盖 |
+| `requestTimeout` | `600000` | 代理传输总时长上限（毫秒），响应头到达后开始计时，`0` 表示不限制 |
+| `maxBody` | `50000000` | 请求体上限（字节），见上文 |
+| `methods` | `['GET','POST','PUT','DELETE','OPTIONS','HEAD','PATCH','TRACE']` | 注册路由时使用的请求方法集合 |
+| `full` | `false` | 全代理模式：未命中时直接返回 502，而不是 `next()` 交还中间件链。配置了 `defaultServer` 时以回退优先 |
+| `addIP` | `false` | 为 `true` 时把客户端 IP **追加**到已有的真实 IP 头（形成逗号分隔链），否则直接覆盖 |
+| `realIPHeader` | `'x-real-ip'` | 携带客户端 IP 的请求头名称 |
+| `balancer` | `null` | 自定义负载均衡器，需提供 `select(c, prlist, pxybalance)` 方法。框架内置 `Topbit.ProxyBalancer`（基于标识的一致性哈希） |
+| `connectOptions` | `{family: 4}` | 传给底层请求的连接选项，可被后端配置项 `connectOptions` 逐项覆盖 |
+| `maxSockets` | `1000` | 每个后端 Agent 的最大连接数 |
+| `maxFreeSockets` | `100` | 每个后端 Agent 的最大空闲连接数 |
+| `agentKeepAlive` | `true` | 后端 Agent 是否启用 keepAlive |
+| `autoClearListeners` | `false` | 转发结束后清理后端响应对象上的监听器 |
+| `debug` | `false` | 输出调试信息 |
+
+**后端配置项（`config` 中每一项）：**
+
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| `url` | 必填 | 后端地址，支持 `http://`、`https://`、`unix://` |
+| `path` | `'/'` | 匹配路径，会被规范成前缀路由 |
+| `weight` | `1` | 权重，数字越大被选中的比例越高 |
+| `timeout` | 继承实例 | 单次请求超时 |
+| `requestTimeout` | 继承实例 | 传输总时长上限 |
+| `maxBody` | 继承实例 | 请求体上限 |
+| `headers` | `{}` | 转发时附加的请求头，同名时覆盖客户端的 |
+| `resHeaders` | `null` | 附加到响应上的头 |
+| `resHeadersCallback` | `null` | 函数，自定义处理后端响应头 |
+| `rewrite` | `null` | 函数 `(ctx, path)`，返回改写后的路径，返回空值表示不改写 |
+| `aliveCheckPath` | `'/'` | 存活检测请求的路径 |
+| `aliveCheckInterval` | `5` | 存活检测间隔（秒），范围 0 ~ 7200，`0` 表示关闭 |
+| `aliveCheckMethod` | `'GET'` | 存活检测使用的方法，可选 `GET`、`HEAD`、`TRACE` |
+| `connectOptions` | 继承实例 | 该后端专用的连接选项 |
+
+**关于 `ProxyNoAgent`：** 扩展中还提供了 `ProxyNoAgent`，用法与 `Proxy` 完全一致，区别是不为每个后端维护独立的 `http(s).Agent`，而是走全局 Agent。因此上表中的 `maxSockets` / `maxFreeSockets` / `agentKeepAlive` 对它不适用，改为实例级的 `keepAlive`（默认 `true`）。
 
 > Node.js >= 19 起 `http.globalAgent` 默认 `keepAlive: true`，因此 `ProxyNoAgent` 默认**仍会复用连接**。若确实需要"一请求一连接"的语义，请显式传入 `keepAlive: false`。
 
@@ -1950,6 +2068,10 @@ const pxy = new ProxyNoAgent({
 ### 6. Http2Proxy (HTTP/2 反向代理)
 
 HTTP/2 协议的反向代理，参数与 `Proxy` 基本一致，利用 HTTP/2 连接机制进行保活。
+
+以下行为与 `Proxy` 完全相同，用法参见上一节：`port` 的 key 拼接规则、`defaultServer`、路径匹配与跨 host 降级、未命中处理（同样使用 `@topbit_proxy` 分组）、`config` 中 `path` / `url` / `weight` / `headers` / `rewrite` 等后端配置项，以及自定义 `balancer`。
+
+差异在于连接管理：`Http2Proxy` 不使用 `http.Agent`，而是维护 HTTP/2 连接池，因此没有 `maxSockets` / `maxFreeSockets` / `agentKeepAlive`，取而代之的是下面的连接池选项；存活判定也不依赖定时探活，而是以连接池是否持有可用连接为准。
 
 ```javascript
 const Topbit = require('topbit')

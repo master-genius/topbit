@@ -1830,6 +1830,84 @@ pxy.init(app)
 app.run(1234)
 ```
 
+**Path matching and cross-host fallback:**
+
+The `path` in a backend entry is normalized into a prefix route: `/api` → `/api/*`, `/` → `/*` (parameter routes containing `/:` are kept as-is). Paths from all hosts are merged into a single global route table and registered with the framework; each distinct path is registered exactly once, so multiple hosts declaring the same path never conflict.
+
+Because route matching happens **before** middleware and is not Host-aware, the `c.routepath` handed to the proxy is the **globally most specific** one, which is not necessarily a path the current host declared. The proxy automatically **falls back** to the longest prefix that host did declare:
+
+```javascript
+const pxy = new Proxy({
+    port: 443,
+    config: {
+        'a.com': [
+            { path: '/api',    url: 'http://127.0.0.1:8001' },
+            { path: '/static', url: 'http://127.0.0.1:8002' }
+        ],
+        'b.com': [{ path: '/',       url: 'http://127.0.0.1:8003' }],
+        'c.com': [{ path: '/api/v2', url: 'http://127.0.0.1:8004' }]
+    }
+})
+```
+
+| Request | Matched routepath | Fallback | Forwarded to |
+|---|---|---|---|
+| `a.com/api/x` | `/api/*` | direct hit | a's `/api` backend |
+| `a.com/api/v2/x` | `/api/v2/*` | → `/api/*` | a's `/api` backend |
+| `a.com/other` | `/*` | nothing to fall back to | no match |
+| `b.com/api/v2/x` | `/api/v2/*` | → `/*` | b's `/` backend, full path `/api/v2/x` forwarded |
+| `c.com/api/x` | `/api/*` | nothing to fall back to | no match |
+
+Fallback rules:
+
+- The fallback map is computed once in `init()`; at runtime it costs a single hash lookup.
+- **Only paths the proxy itself registered are eligible.** Your own application routes (e.g. `app.get('/admin/:id')`) are not in the map and will never be swallowed by the proxy.
+- **It only falls back to a path that host actually declared** — no backend is invented.
+- If there is nothing to fall back to, the request is treated as unmatched.
+- After a fallback, `c.routepath` is rewritten to the path actually used, so later middleware sees the real value.
+- Parameter routes (those not ending in `/*`) do not participate.
+
+**defaultServer (default host):**
+
+Specifies the fallback target when the request Host matches no configured host. The typical use is routing traffic for retired domains to one canonical domain.
+
+```javascript
+const pxy = new Proxy({
+    port: 443,
+    defaultServer: 'main.com',       // 'https://main.com' also works; the scheme is stripped
+    config: {
+        'a.com'   : 'http://127.0.0.1:8001',
+        'main.com': 'http://127.0.0.1:8009'
+    }
+})
+```
+
+- The value is a **host name**, not a URL. Forms like `'https://main.com/x'` have the scheme and path stripped, leaving `main.com`.
+- Works together with `port`: you may give the bare host exactly as written in `config`, and the proxy appends the port before matching.
+- If the normalized value is not present in `config`, a warning is printed and the option is ignored, leaving behavior unchanged.
+- **It only applies when the Host does not match.** A matching Host with no matching path does not fall back — that means "this domain has no such path".
+- The host fallback happens before the path fallback, so the fallback target host also benefits from path fallback.
+- HTTP/1.0 requests with no Host header are caught by `defaultServer` as well.
+
+**Handling unmatched requests:**
+
+When the proxy does not match (neither Host nor path), it calls `next()` and hands the request back to the middleware chain. The routes registered by `init()` belong to the group `topbit_proxy`, so adding a middleware to that group lets you customise the unmatched response:
+
+```javascript
+// Works the same for Proxy / ProxyNoAgent / Http2Proxy
+app.use(async (c, next) => {
+    return c.status(404).html('<h1>404 Not Found</h1>')
+}, '@topbit_proxy')
+```
+
+Three properties of this middleware:
+
+- It sits **downstream** of the proxy middleware, so it does not run when the proxy matches.
+- It only applies to routes the proxy registered and **never affects your own application routes**.
+- It is orthogonal to `defaultServer`: an unmatched Host is taken over by `defaultServer` first; only a matched Host with an unmatched path reaches this middleware.
+
+If `full` mode is on and `defaultServer` is not configured, an unmatched request returns 502 directly instead of calling `next()`.
+
 **Load Balancing Configuration:**
 Implemented via configuration arrays, supporting `weight` and alive checks.
 
@@ -1857,7 +1935,6 @@ let load_balance_cfg = {
 
 const pxy = new Proxy({
     timeout: 10000,
-    starPath : true, // If enabled, forwards the string after the proxy path as the path
     config: load_balance_cfg
 })
 
@@ -1895,7 +1972,48 @@ const pxy = new Proxy({
 pxy.init(app)
 ```
 
-**About `ProxyNoAgent`:** the extensions also ship `ProxyNoAgent`, used exactly like `Proxy` except that it keeps no per-backend `http(s).Agent` and relies on the global agent instead.
+**Full list of constructor options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `config` / `host` | `{}` | Proxy table; key is a host, value is a string, object, or array of objects |
+| `port` | `''` | Listening port, used to auto-append to the keys of `config`; see above |
+| `defaultServer` | `''` | Fallback host when the Host does not match; see above |
+| `timeout` | `35000` | Timeout for a single backend request (ms); can be overridden per backend |
+| `requestTimeout` | `600000` | Overall transfer time limit (ms), counted from when response headers arrive; `0` means unlimited |
+| `maxBody` | `50000000` | Request body limit in bytes; see above |
+| `methods` | `['GET','POST','PUT','DELETE','OPTIONS','HEAD','PATCH','TRACE']` | Methods used when registering routes |
+| `full` | `false` | Full-proxy mode: an unmatched request returns 502 instead of calling `next()`. When `defaultServer` is configured the fallback takes precedence |
+| `addIP` | `false` | When `true`, **append** the client IP to an existing real-IP header (comma-separated chain) instead of overwriting it |
+| `realIPHeader` | `'x-real-ip'` | Name of the header carrying the client IP |
+| `balancer` | `null` | Custom load balancer providing `select(c, prlist, pxybalance)`. `Topbit.ProxyBalancer` (identity-based consistent hashing) is built in |
+| `connectOptions` | `{family: 4}` | Connection options passed to the underlying request; each key can be overridden per backend |
+| `maxSockets` | `1000` | Max sockets per backend Agent |
+| `maxFreeSockets` | `100` | Max free sockets per backend Agent |
+| `agentKeepAlive` | `true` | Whether the backend Agent uses keepAlive |
+| `autoClearListeners` | `false` | Remove listeners from the backend response object after forwarding completes |
+| `debug` | `false` | Print debug output |
+
+**Backend options (each entry in `config`):**
+
+| Option | Default | Description |
+|---|---|---|
+| `url` | required | Backend address; `http://`, `https://` and `unix://` are supported |
+| `path` | `'/'` | Match path, normalized into a prefix route |
+| `weight` | `1` | Weight; higher values are selected more often |
+| `timeout` | inherits instance | Per-request timeout |
+| `requestTimeout` | inherits instance | Overall transfer time limit |
+| `maxBody` | inherits instance | Request body limit |
+| `headers` | `{}` | Extra request headers when forwarding; overrides the client's on conflict |
+| `resHeaders` | `null` | Extra headers added to the response |
+| `resHeadersCallback` | `null` | Function to post-process backend response headers |
+| `rewrite` | `null` | Function `(ctx, path)` returning the rewritten path; a falsy return means no rewrite |
+| `aliveCheckPath` | `'/'` | Path used by the alive check request |
+| `aliveCheckInterval` | `5` | Alive check interval in seconds, range 0 ~ 7200; `0` disables it |
+| `aliveCheckMethod` | `'GET'` | Method used by the alive check; one of `GET`, `HEAD`, `TRACE` |
+| `connectOptions` | inherits instance | Connection options for this backend only |
+
+**About `ProxyNoAgent`:** the extensions also ship `ProxyNoAgent`, used exactly like `Proxy` except that it keeps no per-backend `http(s).Agent` and relies on the global agent instead. Therefore `maxSockets` / `maxFreeSockets` / `agentKeepAlive` from the table above do not apply to it; the instance-level `keepAlive` (default `true`) takes their place.
 
 > Since Node.js >= 19 `http.globalAgent` defaults to `keepAlive: true`, so `ProxyNoAgent` **still reuses connections** by default. Pass `keepAlive: false` explicitly if you really want one connection per request.
 
@@ -1913,6 +2031,10 @@ const pxy = new ProxyNoAgent({
 ### 6. Http2Proxy (HTTP/2 Reverse Proxy)
 
 Reverse proxy for HTTP/2 protocol. Parameters are basically the same as `Proxy`, using HTTP/2 connection mechanisms for keep-alive.
+
+The following behave exactly as in `Proxy` — see the previous section for details: the `port` key-appending rules, `defaultServer`, path matching and cross-host fallback, handling of unmatched requests (also via the `@topbit_proxy` group), the backend options in `config` (`path` / `url` / `weight` / `headers` / `rewrite` and so on), and custom `balancer`.
+
+The difference is connection management: `Http2Proxy` does not use `http.Agent` but maintains an HTTP/2 connection pool, so `maxSockets` / `maxFreeSockets` / `agentKeepAlive` do not apply — the pool options below take their place. Liveness is likewise not determined by periodic probes but by whether the pool holds a usable connection.
 
 ```javascript
 const Topbit = require('topbit')

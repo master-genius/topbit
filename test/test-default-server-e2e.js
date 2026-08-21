@@ -104,8 +104,10 @@ const cases = [
   { desc: 'host 命中 + 路由未命中 → 不回退 defaultServer（空响应）',
     port: PORT_WITH, host: 'a.com:' + PORT_WITH, path: '/', expect: '__empty__' },
 
-  { desc: '已知差异：host 未命中但该 routepath 不在 default host 表内 → 空响应',
-    port: PORT_WITH, host: 'unknown.com:' + PORT_WITH, path: '/api/x', expect: '__empty__' },
+  // routepath 降级（test-proxy-path-fallback.js）之后，这里不再是"已知差异"：
+  // /api/* 在 legacy.com 表里没有，降级到 legacy.com 自己的 /*，与 nginx 一致
+  { desc: 'host 未命中 + routepath 不在 default host 表内 → 降级后仍走 defaultServer',
+    port: PORT_WITH, host: 'unknown.com:' + PORT_WITH, path: '/api/x', expect: 'backend-default' },
 
   { desc: '未配 defaultServer：host 未命中 → 空响应（默认行为不变）',
     port: PORT_WITHOUT, host: 'unknown.com:' + PORT_WITHOUT, path: '/', expect: '__empty__' },

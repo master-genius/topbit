@@ -145,6 +145,32 @@ function fmtpath(path) {
   return `${path}*`
 }
 
+/**
+ * 生成 routepath 的降级候选序列，按最长前缀优先。
+ * 路由表是所有 host 的 path 并集，路由匹配发生在中间件之前且不感知 Host，
+ * 因此 c.routepath 是"全局最具体"，未必是"该 host 范围内最具体"——
+ * 例如 a.com 声明 /api、b.com 只声明 /，请求 b.com/api/x 会命中 /api/*，
+ * 而 hostProxy['b.com'] 里没有这一条。降级序列用于把它退回该 host 自己声明过的前缀。
+ *
+ * '/v1/api/*' -> ['/v1/*', '/*']
+ * '/*'        -> []
+ * 参数路由（不以 /* 结尾）不参与降级。
+ */
+function fallbackPaths(routepath) {
+  if (!routepath.endsWith('/*')) return []
+
+  let base = routepath.slice(0, -2)
+
+  const out = []
+
+  while (base.length > 0) {
+    base = base.slice(0, base.lastIndexOf('/'))
+    out.push(`${base}/*`)
+  }
+
+  return out
+}
+
 let Http2Proxy = function (options = {}) {
 
   if (!(this instanceof Http2Proxy)) return Http2Proxy(options)
@@ -153,9 +179,14 @@ let Http2Proxy = function (options = {}) {
 
   this.urlpreg = /(?:unix:\/\/\/[a-zA-Z0-9\-\_\/\.]+|unix:\/\/[a-zA-Z0-9\-\_]+|(?:http|https):\/\/[\[a-zA-Z0-9\-\_]+)/
 
-  this.hostProxy = {}
-  this.proxyBalance = {}
-  this.pathTable = {}
+  // 查表 key 直接来自 Host 头（外部可控），用无原型对象避免取到 constructor 等原型属性。
+  // 内层以 routepath 为 key，必然以 / 开头，本无此风险，一并统一形态。
+  this.hostProxy = Object.create(null)
+  this.proxyBalance = Object.create(null)
+  this.pathTable = Object.create(null)
+
+  // host -> { 全局path: 降级后的path }，init() 中预计算
+  this.pathFallback = Object.create(null)
 
   this.methods = [
     'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD', 'PATCH', 'TRACE'
@@ -175,8 +206,6 @@ let Http2Proxy = function (options = {}) {
   this.requestTimeout = 600000
 
   this.maxAliveStreams = 100
-
-  this.starPath = false
 
   this.addIP = false
 
@@ -211,10 +240,6 @@ let Http2Proxy = function (options = {}) {
 
       case 'config':
         this.config = options[k]
-        break
-
-      case 'starPath':
-        this.starPath = !!options[k]
         break
 
       case 'maxBody':
@@ -424,8 +449,8 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
 
       for (let hk of keys) {
         if (this.hostProxy[hk] === undefined) {
-          this.hostProxy[hk] = {}
-          this.proxyBalance[hk] = {}
+          this.hostProxy[hk] = Object.create(null)
+          this.proxyBalance[hk] = Object.create(null)
         }
       }
 
@@ -616,7 +641,17 @@ Http2Proxy.prototype.mid = function () {
       host = self.defaultHost
     }
 
-    if (!self.hostProxy[host] || !self.hostProxy[host][c.routepath]) {
+    const t = self.hostProxy[host]
+
+    // 该 host 没声明这条全局 path，退回它自己声明过的最长前缀（见 buildPathFallback）。
+    // 直接改写 c.routepath——这就是本次代理实际执行的 routepath。降级成功必然命中，
+    // 不会走到下面的 next()，因此不存在改写后泄漏给下游中间件的情况。
+    if (t && !t[c.routepath]) {
+      const fb = self.pathFallback[host]
+      if (fb && fb[c.routepath]) c.routepath = fb[c.routepath]
+    }
+
+    if (!t || !t[c.routepath]) {
       if (self.full) {
         return c.status(502).to(error_502_text)
       }
@@ -936,16 +971,49 @@ Http2Proxy.prototype.mid = function () {
 
 }
 
+/**
+ * 预计算每个 host 的 routepath 降级映射，运行时 O(1) 查表。
+ * 键只取自 pathTable（代理自己注册的 path），所以应用自有的业务路由
+ * 不会出现在映射里，也就不会被代理吞掉；值只取自该 host 已声明的 path，
+ * 不会凭空产生后端。降不下去就是未命中，与 nginx"没有匹配的 location"一致。
+ */
+Http2Proxy.prototype.buildPathFallback = function () {
+  this.pathFallback = Object.create(null)
+
+  for (const h in this.hostProxy) {
+    const t = this.hostProxy[h]
+
+    let map = null
+
+    for (const gp in this.pathTable) {
+      if (t[gp] !== undefined) continue
+
+      for (const fp of fallbackPaths(gp)) {
+        if (t[fp] === undefined) continue
+
+        if (map === null) map = Object.create(null)
+        map[gp] = fp
+        break
+      }
+    }
+
+    if (map !== null) this.pathFallback[h] = map
+  }
+}
+
 Http2Proxy.prototype.init = function (app) {
   app.config.timeout = this.timeout
 
+  this.buildPathFallback()
+
   for (let p in this.pathTable) {
-    app.router.map(this.methods, p, async c => {}, '@topbit_h2_proxy');
+    // 分组名与 proxy/proxyNoAgent 统一：应用层不需要关心上游走 http1 还是 http2
+    app.router.map(this.methods, p, async c => {}, '@topbit_proxy');
   }
 
   app.use(this.mid(), {
     pre: true,
-    group: `topbit_h2_proxy`
+    group: `topbit_proxy`
   })
 
 }
