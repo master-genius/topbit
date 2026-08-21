@@ -164,6 +164,11 @@ function router_group(grp_name, callback, app=null, prefix=true, createApp, deep
 const SEG_S = new Int32Array(32);
 const SEG_E = new Int32Array(32);
 
+//段字符串的惰性物化缓冲：某一段第一次参与比较时才切出来，之后所有候选路由复用。
+//候选很多时（例如大量共享同一静态前缀的星号路由），一次切分可以摊薄到几十次比较上，
+//而比较本身用原生字符串 !== ，比逐次调用 startsWith 更快。
+const SEG_BUF = new Array(32);
+
 class Router {
 
   constructor(options = {}) {
@@ -616,6 +621,7 @@ class Router {
       }
     }
 
+    let matz = 0;                 //SEG_BUF 已物化到的段下标
     let next = 0;
     let args = {};
     let r = null;
@@ -639,9 +645,8 @@ class Router {
         for (let i = 0; i < r.routePath.length; i++) {
           cur_path = r.routePath[i];
           if (cur_path.isStar) continue;
-          if (SEG_E[i] - SEG_S[i] !== cur_path.path.length
-            || !path.startsWith(cur_path.path, SEG_S[i]))
-          {
+          while (matz <= i) { SEG_BUF[matz] = path.substring(SEG_S[matz], SEG_E[matz]); matz++; }
+          if (cur_path.path !== SEG_BUF[i]) {
             next = true;
             break;
           }
@@ -655,9 +660,8 @@ class Router {
         for(let i=0; i < r.routePath.length; i++) {
           cur_path = r.routePath[i];
           if (cur_path.isArgs) continue;
-          if (SEG_E[i] - SEG_S[i] !== cur_path.path.length
-            || !path.startsWith(cur_path.path, SEG_S[i]))
-          {
+          while (matz <= i) { SEG_BUF[matz] = path.substring(SEG_S[matz], SEG_E[matz]); matz++; }
+          if (cur_path.path !== SEG_BUF[i]) {
             next = true;
             break;
           }
@@ -667,7 +671,8 @@ class Router {
           for (let i=0; i < r.routePath.length; i++) {
             cur_path = r.routePath[i];
             if (cur_path.isArgs) {
-              args[ cur_path.name ] = path.slice(SEG_S[i], SEG_E[i]);
+              while (matz <= i) { SEG_BUF[matz] = path.substring(SEG_S[matz], SEG_E[matz]); matz++; }
+              args[ cur_path.name ] = SEG_BUF[i];
             }
           }
         }

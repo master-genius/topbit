@@ -4,3 +4,14 @@
 /node_modules/
 /demo/tmp/
 .qwen/
+
+# 编辑器交换文件
+*.swp
+*.swo
+*~
+
+# 调试与性能分析产物
+*.log
+isolate-*.log
+*.heapsnapshot
+*.cpuprofile
