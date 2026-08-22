@@ -371,7 +371,9 @@ class Proxy {
   }
 
   fmtpath(path) {
-    path = path.trim()
+    //必须与 router.addPath() 的归一化保持一致：连续斜杠先合并，
+    //否则 pathTable 的 key 与路由注册后的 key 不一致，运行期恒查不到。
+    path = path.trim().replace(/\/{2,}/g, '/')
 
     if (path.length == 0) {
       return '/*'

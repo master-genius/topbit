@@ -343,6 +343,43 @@ Existing routes: /x/y/:id  /x/y/* /x/*  /x/:key/:id
 
 ----
 
+----
+
+## Route Format Validation
+
+`router.checkRoute(path)` checks whether a route string is well-formed **before** registering it. It does not register anything, does not throw, and has no side effects — useful when routes are generated from a configuration file, so errors surface at startup rather than as an `addPath()` throw.
+
+``` JavaScript
+const r = app.router;
+
+r.checkRoute('/api/:id')
+// { ok: true }
+
+r.checkRoute('/x/:id/*')
+// { ok: false, message: '...', route: '/x/:id/*' }
+```
+
+When `ok` is `false`, `message` explains the problem and `route` is the normalized route string (the form in which this route would actually be registered).
+
+What it checks:
+
+| Item | Rule |
+|---|---|
+| Type | Must be a string |
+| Character set | Only `letters digits - _ : * / . @`, max length 1000 |
+| Position of `*` | Only allowed as the last segment |
+| Number of `*` | At most one |
+| `:` with `*` | Cannot appear in the same route |
+| Parameter name | Must not be empty, must not be `__proto__` |
+
+It does **not** check pattern conflicts or duplicate route names. Those depend on what is already registered in the route table — runtime state rather than a property of the string itself, so the same route string yields different answers in different route tables. `addPath()` still checks them at registration time.
+
+`addPath()` calls `checkRoute()` internally, so the two always agree.
+
+Route strings are also normalized at registration: consecutive slashes are collapsed, a missing leading slash is added, and a trailing slash is stripped. `router.normalizeRoute(path)` returns that normalized form — `//api//v2//` and `/api/v2` are the same route.
+
+----
+
 ## Grouping Routes
 
 You can use `app.middleware` to specify middleware and use the returned `group` method to add grouped routes, or use `app.group` directly.

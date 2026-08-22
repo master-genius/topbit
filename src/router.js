@@ -318,12 +318,110 @@ class Router {
 
         p.routePath.push(t);
 
-        if (p.routeArr[i][0] != ':') {
-          continue;
-        }
+        //参数名为空、参数名为 __proto__ 的格式校验已在 checkRoute() 完成
+        if (t.isArgs) p.argsCount++;
+      }
 
-        if (p.routeArr[i].length < 2) {
-          throw new Error(`${path} : 参数不能没有名称，请在:后添加名称`);
+      this.conflictCheck(p, path, method);
+    } else {
+      //* 的数量校验已在 checkRoute() 完成
+      p.starPrePath = path.substring(0, path.length - 1);
+      p.starLength = p.starPrePath.length;
+      for (let i = 0; i < p.routeArr.length; i++) {
+        p.routePath.push({path: p.routeArr[i], isStar: p.routeArr[i] === '*'})
+      }
+    }
+  }
+
+  /**
+   * 路由字符串归一化：合并连续斜杠、补首斜杠、剥末尾斜杠。
+   * checkRoute() 与 addPath() 共用同一份，保证自检结论与实际注册结果永远一致。
+   * @param {string} path 路由字符串
+   * @returns {string} 归一化后的路由串
+   */
+  normalizeRoute(path) {
+    let route = path.trim().replace(/\/{2,}/g, '/');
+
+    if (route === '') { return '/'; }
+
+    if (route[0] !== '/') { route = `/${route}`; }
+
+    //末尾的/没有实际语义，注册路由时一律剥掉。
+    if (route.length > 1 && route[route.length-1] === '/') {
+      route = route.substring(0, route.length-1);
+    }
+
+    return route;
+  }
+
+  /**
+   * 检测路由字符串的格式是否合法，不注册、不抛错、无副作用。
+   *
+   * 只做「格式」校验：非法字符、* 的位置与数量、: 与 * 共存、参数名。
+   * 不做模式冲突（conflictCheck）与命名重复检测——那两项取决于当前已注册了
+   * 什么，是运行期状态而非字符串本身的属性，同一个路由串在不同路由表里结论
+   * 不同，放进来会让这个方法的语义变得不可预期。
+   *
+   * 提供给上层应用（如网关类应用从配置文件生成路由）在注册之前自检配置，
+   * 把错误暴露在启动前，而不是 addPath() 抛错时才发现。
+   *
+   * @param {string} path 待检测的路由字符串
+   * @returns {{ok: true}|{ok: false, message: string, route: string}}
+   *          ok 为 false 时，message 是提示信息，route 是归一化后的路由串
+   */
+  checkRoute(path) {
+    if (typeof path !== 'string') {
+      return {
+        ok: false,
+        message: `路由必须是字符串，当前为 ${typeof path}`,
+        route: ''
+      };
+    }
+
+    const route = this.normalizeRoute(path);
+
+    if (!this.path_preg.test(route)) {
+      return {
+        ok: false,
+        message: `路由字符串 ${path} 存在非法字符，路由字符串允许 '字母 数字 - _ : * / . @'，最大长度${this.maxPath}`,
+        route: route
+      };
+    }
+
+    const isArgs = route.indexOf('/:') >= 0;
+    let isStar = false;
+
+    if (route.indexOf('/*') >= 0) {
+      if (route.indexOf('/*/') >= 0) {
+        return {
+          ok: false,
+          message: `${route} : 任意匹配参数 * 只能出现在最后`,
+          route: route
+        };
+      }
+      isStar = route[route.length - 1] === '*';
+    }
+
+    if (isArgs && isStar) {
+      return {
+        ok: false,
+        message: `${route} 参数 : 和 * 不能同时出现`,
+        route: route
+      };
+    }
+
+    if (isArgs) {
+      const segs = route.split('/').filter(p => p.length > 0);
+
+      for (let i = 0; i < segs.length; i++) {
+        if (segs[i][0] !== ':') continue;
+
+        if (segs[i].length < 2) {
+          return {
+            ok: false,
+            message: `${route} : 参数不能没有名称，请在:后添加名称`,
+            route: route
+          };
         }
 
         /**
@@ -333,31 +431,29 @@ class Router {
          * 其余原型键（constructor、toString 等）都是可写数据属性，赋值会创建自有
          * 属性正常覆盖，不受影响，无需限制。
          */
-        if (t.name === '__proto__') {
-          console.error(`\x1b[7;31;47mError: ${method} ${path} 参数不能命名为 __proto__ \x1b[0m\n`);
-          throw new Error(`${path} : 参数不能命名为 __proto__`);
+        if (segs[i].substring(1) === '__proto__') {
+          return {
+            ok: false,
+            message: `${route} : 参数不能命名为 __proto__`,
+            route: route
+          };
         }
-
-        if (t.isArgs) p.argsCount++;
       }
-
-      this.conflictCheck(p, path, method);
-    } else {
+    } else if (isStar) {
       let starCount = 0;
-      for (let i = 0; i < path.length; i++) {
-        if (path[i] == '*') {
-          starCount += 1;
-        }
+      for (let i = 0; i < route.length; i++) {
+        if (route[i] === '*') starCount += 1;
       }
       if (starCount > 1) {
-        throw new Error(`${path} : 多个 * 导致冲突`);
-      }
-      p.starPrePath = path.substring(0, path.length - 1);
-      p.starLength = p.starPrePath.length;
-      for (let i = 0; i < p.routeArr.length; i++) {
-        p.routePath.push({path: p.routeArr[i], isStar: p.routeArr[i] === '*'})
+        return {
+          ok: false,
+          message: `${route} : 多个 * 导致冲突`,
+          route: route
+        };
       }
     }
+
+    return {ok: true};
   }
 
   /*
@@ -380,21 +476,15 @@ class Router {
       throw new Error(`${method} ${path}: 回调函数必须使用async声明`);
     }
 
-    let api_path = path.trim().replace(/\/{2,}/g, '/');
-    if (api_path === '') {
-      api_path = '/';
+    //格式校验与归一化全部委托给 checkRoute()，避免规则在两处各改各的。
+    //模式冲突与命名重复取决于已注册内容，不在其职责内，仍留在下面。
+    const chk = this.checkRoute(path);
+    if (chk.ok === false) {
+      console.error(`\x1b[7;31;47mError: ${method} ${chk.message} \x1b[0m\n`);
+      throw new Error(chk.message);
     }
 
-    if (!this.path_preg.test(api_path)) {
-      throw new Error(`路由字符串 ${path} 存在非法字符，路由字符串允许 '字母 数字 - _ : * /'，最大长度${this.maxPath}\n`);
-    }
-    
-    if (api_path[0] !== '/') { api_path = `/${api_path}`; }
-
-    //末尾的/没有实际语义，注册路由时一律剥掉。
-    if (api_path.length > 1 && api_path[api_path.length-1] == '/') {
-      api_path = api_path.substring(0, api_path.length-1);
-    }
+    let api_path = this.normalizeRoute(path);
 
     let group = '';
     if (typeof name === 'object') {
@@ -433,17 +523,9 @@ class Router {
       add_req.isArgs = true;
     }
 
-    if (api_path.indexOf('/*') >= 0) {
-      let last_char = api_path[api_path.length - 1];
-      if (api_path.indexOf('/*/') >= 0) {
-        throw new Error(`${api_path} : 任意匹配参数 * 只能出现在最后`);
-      }
-      if (last_char === '*') add_req.isStar = true;
-    }
-
-    if (add_req.isStar && add_req.isArgs) {
-      console.error(`\x1b[7;31;47mError: path中 : 和 * 不能同时出现 \x1b[0m\n`);
-      throw new Error(`${api_path} 参数 : 和 * 不能同时出现`);
+    //* 的位置、数量以及与 : 共存的校验已在 checkRoute() 完成，此处只取结果
+    if (api_path.indexOf('/*') >= 0 && api_path[api_path.length - 1] === '*') {
+      add_req.isStar = true;
     }
 
     if (name !== '' && this.nameTable[name]) {
