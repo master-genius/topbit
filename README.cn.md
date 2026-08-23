@@ -1750,6 +1750,23 @@ app.get('/favicon.ico', async c => {}, {group: '_static'})
 **接口说明：**
 *   `addType(obj)`: 添加扩展名到 content-type 的映射关系。
 *   `clearCache()`: 清理缓存。
+*   `removeCache(path)` / `removeNameCache(name)`: 按路径或名称片段清理缓存条目，并同步扣减已用量。
+*   `canCache()`: 当前是否还能接纳新的缓存条目。
+
+**内容编码协商**
+
+对文本类资源（`text/*`、`.json`、`font/*`）且大于 1KB 时会做 gzip 压缩，是否真的以压缩形式发送取决于请求的 `accept-encoding`：
+
+| `accept-encoding` | 行为 |
+|---|---|
+| 缺失 | 压缩（RFC 9110 §12.5.3：未表达偏好即任意编码皆可接受） |
+| 存在但为空串 | 不压缩（明确表示不要任何内容编码） |
+| 含 `gzip` 或 `*`（且 q 不为 0） | 压缩 |
+| 其他（如 `identity`、`br, deflate`、`gzip;q=0`） | 不压缩 |
+
+缓存**同时保留原文与压缩版本**，按每个请求二选一，因此不接受 gzip 的客户端不会拿到压缩字节。两种表示是同一资源的不同表示，各自的 ETag 不同（压缩版本以 `-gz` 结尾），响应带 `Vary: accept-encoding`，条件请求按实际发送的那种表示判定 304。压缩后若反而比原文大则丢弃。
+
+超过 `maxFileSize` 的文件走纯流式发送，不缓存也不压缩。缓存已满时同样走纯流式，不再为了填缓存而把整个文件累积到内存。
 
 ---
 
@@ -2062,6 +2079,8 @@ pxy.init(app)
 | `full` | `false` | 全代理模式：未命中时直接返回 502，而不是 `next()` 交还中间件链。配置了 `defaultServer` 时以回退优先 |
 | `addIP` | `false` | 为 `true` 时把客户端 IP **追加**到已有的真实 IP 头（形成逗号分隔链），否则直接覆盖 |
 | `realIPHeader` | `'x-real-ip'` | 携带客户端 IP 的请求头名称 |
+| `realHostHeader` | `'x-real-host'` | 携带客户端最初请求 Host 的请求头名称 |
+| `realProtoHeader` | `'x-real-proto'` | 携带客户端最初请求协议（`http` / `https`）的请求头名称 |
 | `balancer` | `null` | 自定义负载均衡器，需提供 `select(c, prlist, pxybalance)` 方法。框架内置 `Topbit.ProxyBalancer`（基于标识的一致性哈希） |
 | `connectOptions` | `{family: 4}` | 传给底层请求的连接选项，可被后端配置项 `connectOptions` 逐项覆盖 |
 | `maxSockets` | `1000` | 每个后端 Agent 的最大连接数 |
@@ -2088,6 +2107,20 @@ pxy.init(app)
 | `aliveCheckInterval` | `5` | 存活检测间隔（秒），范围 0 ~ 7200，`0` 表示关闭 |
 | `aliveCheckMethod` | `'GET'` | 存活检测使用的方法，可选 `GET`、`HEAD`、`TRACE` |
 | `connectOptions` | 继承实例 | 该后端专用的连接选项 |
+
+**接口说明：**
+
+*   `init(app)`: 挂载到 topbit 实例，注册代理路由与中间件，并启动存活检测。
+*   `stopAliveCheck()`: 停止全部存活检测定时器，返回 `this`。**优雅重载时必须调用** —— `server.close()` 只停止 accept 新连接，存活检测的定时器仍在跑，会让老实例无法被回收，并持续向后端发探测请求。连接失败后的那次补测句柄也会一并清理。
+*   `startAliveCheck()`: 启动（或重新启动）存活检测，返回 `this`。重复调用先停再起，不会遗留旧定时器。
+
+```javascript
+// 优雅重载：停止 accept 之后必须一并停掉存活检测
+serv.close()
+pxy.stopAliveCheck()
+```
+
+> `Http2Proxy` 不使用定时器型的存活检测（它依据连接池状态判活），因此没有这两个方法。
 
 **关于 `ProxyNoAgent`：** 扩展中还提供了 `ProxyNoAgent`，用法与 `Proxy` 完全一致，区别是不为每个后端维护独立的 `http(s).Agent`，而是走全局 Agent。因此上表中的 `maxSockets` / `maxFreeSockets` / `agentKeepAlive` 对它不适用，改为实例级的 `keepAlive`（默认 `true`）。
 
@@ -2150,14 +2183,15 @@ app.run(1234)
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
 | `connectTimeout` | `15000` | 新建 HTTP/2 连接的握手等待上限（毫秒）。此为 `Http2Proxy` 的默认值，连接池自身缺省为 `5000` |
-| `reconnDelay` | `500` | 断线重连的**起始**间隔，随失败次数指数退避 |
+| `reconnDelay` | `500` | 断线重连退避阶梯的基准单位，实际间隔为基准 × 阶梯倍数 |
+| `reconnLadder` | `[1,2,4,8,16,32]` | 退避阶梯（`reconnDelay` 的倍数），走完一轮回到第一级循环 |
 | `maxConnect` | `100` | 单后端最大物理连接数 |
 | `maxAliveStreams` | `100` | 单连接并发流上限，收到对端 SETTINGS 后按 `min(配置, 对端声明)` 收敛 |
 | `minConnect` | `2` | 常驻连接数：零流量时保持不关闭，异常断开后低于此值自动补连。设为 `0` 关闭常驻 |
 
 - **优雅重启**：收到对端 GOAWAY 后，连接立即停止接收新流，但会等待存量流完整收完再关闭（排水上限 30 秒），不会造成响应体被静默截断。
 - **空闲保活**：常驻名额（`minConnect`，默认 2）内的连接零流量时**不关闭**，仅周期性 `ping` 保活——持久连接是 HTTP/2 代理的核心优势（免握手、多路复用），且「握有活连接」本身就是后端可达的健康信号。超出常驻数的富余连接才会被优雅回收，且回收后不补连，因此零流量下既保持可用又不会空转重连。
-- **重连退避**：后端不可用时重连间隔按 `reconnDelay × 2ⁿ` 增长，上限 30 秒。
+- **重连退避**：后端不可用时重连间隔按阶梯放大，默认 500ms → 1s → 2s → 4s → 8s → 16s，**走完一轮回到 500ms 循环**，而不是停在最大间隔上。单调递增的退避一旦爬到最大间隔就不再回头，后端早已恢复却仍要空等一整个长间隔才被发现；循环阶梯既避免定频重连风暴，又让每轮都有一次快速探测，恢复延迟因此有上界。
 
 ---
 

@@ -106,7 +106,11 @@ setTimeout(async () => {
 
   // 缓存记账
   check('缓存条目数 = 3', st.cache.size === 3, `实际 ${st.cache.size}`);
-  check('缓存总大小记账一致', st.size === [...st.cache.values()].reduce((s, e) => s + e.data.length, 0));
+  //缓存同时保留原文与 gzip 两种表示，记账须把两者都算上
+  check('缓存总大小记账一致',
+        st.size === [...st.cache.values()]
+          .reduce((s, e) => s + e.data.length + (e.zdata ? e.zdata.length : 0), 0),
+        `记账 ${st.size}`);
   st.clearCache();
   check('clearCache 清空', st.cache.size === 0 && st.size === 0);
 

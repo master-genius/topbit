@@ -137,6 +137,16 @@ class Proxy {
 
     this.realIPHeader = 'x-real-ip'
 
+    /**
+     * 与 x-real-ip 同族的两个头：让后端知道客户端最初请求的 host 与协议。
+     * 后端据此生成绝对 URL、判断是否该发 https 重定向、决定 Secure cookie。
+     * key 可自定义，取值由代理无条件写入（不接受客户端传入的同名头，
+     * 否则可被伪造），这与 addIP 为 false 时 x-real-ip 的行为一致。
+     */
+    this.realHostHeader = 'x-real-host'
+
+    this.realProtoHeader = 'x-real-proto'
+
     // 查表 key 直接来自 Host 头（外部可控），用无原型对象避免取到 constructor 等原型属性。
     // 内层以 routepath 为 key，必然以 / 开头，本无此风险，一并统一形态。
     this.hostProxy = Object.create(null)
@@ -179,6 +189,12 @@ class Proxy {
 
     // 记录定时器
     this.proxyIntervals = Object.create(null)
+
+    //存活检测是否已停止；停止后 timerRequest 的补测不再自我续接
+    this.aliveCheckStopped = false
+
+    //timerRequest 连接失败后的 500ms 补测句柄，stopAliveCheck() 时一并清理
+    this.retryTimers = new Set()
 
     this.connectOptions = {
       family: 4
@@ -260,6 +276,15 @@ class Proxy {
       switch (k) {
         case 'realIPHeader':
           this.realIPHeader = options[k]
+          break
+
+        case 'realHostHeader':
+        case 'realProtoHeader':
+          if (typeof options[k] === 'string' && options[k].length > 0) {
+            this[k] = options[k].toLowerCase()
+          } else {
+            console.error(`${k} 必须是非空字符串: ${options[k]}`)
+          }
           break
 
         case 'host':
@@ -770,6 +795,14 @@ class Proxy {
         urlobj.headers[self.realIPHeader] = c.ip
       }
 
+      /**
+       * 客户端最初请求的 host 与协议。无条件覆盖：这两个值描述的是"客户端与
+       * 本代理之间"这一跳的事实，由本代理独家知道，接受客户端传入的同名头
+       * 等于允许伪造（后端据此判断是否已走 https，被伪造会导致安全降级）。
+       */
+      urlobj.headers[self.realHostHeader]  = c.host
+      urlobj.headers[self.realProtoHeader] = c.protocol
+
       let hci = urlobj.protocol == 'https:' ? https : http
 
       for (let k in pr.connectOptions) {
@@ -1042,10 +1075,14 @@ class Proxy {
     req.on('error', err => {
       pxy.alive = false
       // 出现连接错误时，短暂延迟后重试一次，排除服务重启等瞬时抖动
-      if (!timeout) {
-        setTimeout(() => {
+      if (!timeout && !this.aliveCheckStopped) {
+        let rt = setTimeout(() => {
+          this.retryTimers.delete(rt)
+          if (this.aliveCheckStopped) return
           this.timerRequest(pxy, true)
         }, 500)
+
+        this.retryTimers.add(rt)
       }
     })
 
@@ -1092,6 +1129,60 @@ class Proxy {
   }
 
   /**
+   * 启动全部后端的存活检测定时器。
+   *
+   * init() 末尾调用；stopAliveCheck() 之后可再次调用恢复。
+   * 重复调用无副作用——先停再起，不会遗留旧定时器。
+   */
+  startAliveCheck() {
+    this.stopAliveCheck()
+
+    this.aliveCheckStopped = false
+
+    for (let k in this.hostProxy) {
+      // :80/:443 别名 key：仅当对应裸 key 存在时跳过（裸 key 负责 alive 检测）；
+      // 手工配置的带端口 key 无裸 key 对应，不跳过
+      if (k.endsWith(':80') && this.hostProxy[k.slice(0, -3)] !== undefined) continue
+      if (k.endsWith(':443') && this.hostProxy[k.slice(0, -4)] !== undefined) continue
+
+      this.proxyIntervals[k] = Object.create(null)
+
+      for (let p in this.hostProxy[k]) {
+        this.proxyIntervals[k][p] = this.setTimer(this.hostProxy[k][p])
+      }
+    }
+
+    return this
+  }
+
+  /**
+   * 停止全部存活检测定时器。
+   *
+   * 优雅重载时必须调用：server.close() 只停止 accept 新连接，存活检测的
+   * setInterval 仍在跑，会让老实例无法被回收，并持续向后端发探测请求。
+   *
+   * 连接失败后的那次 500ms 补测（timerRequest 的 error 分支）也一并清掉，
+   * 否则它会在停止之后继续发出一次请求，并把事件循环多拖住 500ms。
+   */
+  stopAliveCheck() {
+    this.aliveCheckStopped = true
+
+    for (let k in this.proxyIntervals) {
+      let t = this.proxyIntervals[k]
+      for (let p in t) {
+        if (t[p]) clearInterval(t[p])
+      }
+    }
+
+    this.proxyIntervals = Object.create(null)
+
+    for (let t of this.retryTimers) clearTimeout(t)
+    this.retryTimers.clear()
+
+    return this
+  }
+
+  /**
    * 预计算每个 host 的 routepath 降级映射，运行时 O(1) 查表。
    * 键只取自 pathTable（代理自己注册的 path），所以应用自有的业务路由
    * 不会出现在映射里，也就不会被代理吞掉；值只取自该 host 已声明的 path，
@@ -1132,18 +1223,7 @@ class Proxy {
 
     app.use(this.mid(), { pre: true, group: `topbit_proxy` })
 
-    for (let k in this.hostProxy) {
-      // :80/:443 别名 key：仅当对应裸 key 存在时跳过（裸 key 负责 alive 检测）；
-      // 手工配置的带端口 key 无裸 key 对应，不跳过
-      if (k.endsWith(':80') && this.hostProxy[k.slice(0, -3)] !== undefined) continue
-      if (k.endsWith(':443') && this.hostProxy[k.slice(0, -4)] !== undefined) continue
-
-      this.proxyIntervals[k] = Object.create(null)
-
-      for (let p in this.hostProxy[k]) {
-        this.proxyIntervals[k][p] = this.setTimer(this.hostProxy[k][p])
-      }
-    }
+    this.startAliveCheck()
   }
 
 }

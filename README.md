@@ -1710,6 +1710,23 @@ app.get('/favicon.ico', async c => {}, {group: '_static'})
 **Interface Description:**
 *   `addType(obj)`: Add mapping from extension to content-type.
 *   `clearCache()`: Clear the cache.
+*   `removeCache(path)` / `removeNameCache(name)`: Drop cache entries by path or name fragment, adjusting the accounted size.
+*   `canCache()`: Whether a new cache entry can still be admitted.
+
+**Content coding negotiation**
+
+Text-ish resources (`text/*`, `.json`, `font/*`) larger than 1KB are gzipped. Whether the compressed form is actually sent depends on the request's `accept-encoding`:
+
+| `accept-encoding` | Behaviour |
+|---|---|
+| Absent | Compress (RFC 9110 §12.5.3: no stated preference means any coding is acceptable) |
+| Present but empty | Do not compress (the client explicitly wants no content coding) |
+| Contains `gzip` or `*` with a non-zero q | Compress |
+| Anything else (`identity`, `br, deflate`, `gzip;q=0`) | Do not compress |
+
+The cache keeps **both the raw and the gzipped bytes** and picks per request, so a client that does not accept gzip never receives compressed bytes. The two are distinct representations of the same resource: their ETags differ (the compressed one ends in `-gz`), responses carry `Vary: accept-encoding`, and conditional requests are evaluated against whichever representation would be sent. A compressed result that ends up larger than the original is discarded.
+
+Files above `maxFileSize` are streamed without caching or compression. When the cache is full the same applies — the file is no longer accumulated in memory just to populate a cache that cannot accept it.
 
 ---
 
@@ -2020,6 +2037,8 @@ pxy.init(app)
 | `full` | `false` | Full-proxy mode: an unmatched request returns 502 instead of calling `next()`. When `defaultServer` is configured the fallback takes precedence |
 | `addIP` | `false` | When `true`, **append** the client IP to an existing real-IP header (comma-separated chain) instead of overwriting it |
 | `realIPHeader` | `'x-real-ip'` | Name of the header carrying the client IP |
+| `realHostHeader` | `'x-real-host'` | Name of the header carrying the Host the client originally requested |
+| `realProtoHeader` | `'x-real-proto'` | Name of the header carrying the protocol the client originally used (`http` / `https`) |
 | `balancer` | `null` | Custom load balancer providing `select(c, prlist, pxybalance)`. `Topbit.ProxyBalancer` (identity-based consistent hashing) is built in |
 | `connectOptions` | `{family: 4}` | Connection options passed to the underlying request; each key can be overridden per backend |
 | `maxSockets` | `1000` | Max sockets per backend Agent |
@@ -2046,6 +2065,20 @@ pxy.init(app)
 | `aliveCheckInterval` | `5` | Alive check interval in seconds, range 0 ~ 7200; `0` disables it |
 | `aliveCheckMethod` | `'GET'` | Method used by the alive check; one of `GET`, `HEAD`, `TRACE` |
 | `connectOptions` | inherits instance | Connection options for this backend only |
+
+**Methods:**
+
+*   `init(app)`: Attach to a topbit instance — registers the proxy routes and middleware, and starts the alive check.
+*   `stopAliveCheck()`: Stop every alive-check timer; returns `this`. **Required for a graceful reload** — `server.close()` only stops accepting new connections, while the alive-check timers keep running, keeping the old instance alive and still probing backends. The pending retry probe is cleared too.
+*   `startAliveCheck()`: Start (or restart) the alive check; returns `this`. Calling it again stops the existing timers first, so nothing leaks.
+
+```javascript
+// Graceful reload: stop accepting, then stop the alive check as well
+serv.close()
+pxy.stopAliveCheck()
+```
+
+> `Http2Proxy` does not use timer-based alive checking (liveness comes from the connection pool), so it has neither method.
 
 **About `ProxyNoAgent`:** the extensions also ship `ProxyNoAgent`, used exactly like `Proxy` except that it keeps no per-backend `http(s).Agent` and relies on the global agent instead. Therefore `maxSockets` / `maxFreeSockets` / `agentKeepAlive` from the table above do not apply to it; the instance-level `keepAlive` (default `true`) takes their place.
 
@@ -2108,14 +2141,15 @@ app.run(1234)
 | Option | Default | Description |
 |---|---|---|
 | `connectTimeout` | `15000` | Handshake wait limit for a new HTTP/2 connection (ms). This is the `Http2Proxy` default; the pool itself falls back to `5000` |
-| `reconnDelay` | `500` | **Initial** reconnect interval; grows exponentially on repeated failure |
+| `reconnDelay` | `500` | Base unit of the reconnect backoff ladder; actual interval is base × ladder multiplier |
+| `reconnLadder` | `[1,2,4,8,16,32]` | Backoff ladder as multiples of `reconnDelay`; wraps back to the first rung after the last |
 | `maxConnect` | `100` | Max physical connections per backend |
 | `maxAliveStreams` | `100` | Max concurrent streams per connection, converged to `min(config, peer SETTINGS)` |
 | `minConnect` | `2` | Resident connections kept open while idle; also the refill threshold after an abnormal disconnect. Set `0` to disable |
 
 - **Graceful restart**: on GOAWAY the connection stops accepting new streams immediately but drains in-flight streams to completion (30s cap) before closing, so response bodies are never silently truncated.
 - **Idle keepalive**: connections within the resident quota (`minConnect`, default 2) are **never** closed when idle — they are kept alive with periodic `ping`. Persistent connections are the whole point of an HTTP/2 proxy (no handshake, multiplexing), and holding a live connection is itself the reachability signal `ok()` reports. Only surplus connections are reclaimed, and they are not reconnected, so a zero-traffic backend stays usable without spinning on reconnects.
-- **Reconnect backoff**: while a backend is down the reconnect interval grows as `reconnDelay × 2ⁿ`, capped at 30s.
+- **Reconnect backoff**: while a backend is down the interval walks a ladder — 500ms → 1s → 2s → 4s → 8s → 16s by default — and then **wraps back to 500ms** rather than stalling at the maximum. A ladder that only grows never probes quickly again, so a backend that recovered still waits out one full long interval before anyone notices; wrapping keeps one fast probe per cycle, bounding recovery latency, while most attempts still land on the long rungs and avoid a reconnect storm.
 
 ---
 

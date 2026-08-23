@@ -49,6 +49,108 @@ let _typemap = {
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 }
 
+
+/**
+ * 判断客户端是否接受 gzip 编码。
+ *
+ * 只回答"能不能发 gzip"这一个布尔问题，不做完整的 RFC 9110 q 值排序——
+ * 静态分发在 gzip 与原文之间二选一，排序没有意义。
+ *
+ * 性能：绝大多数请求的头是 'gzip, deflate, br' 这类形式，一次 indexOf 即可
+ * 判定，不切分字符串、不产生任何中间对象；只有在编码名后面真的跟着 ';q='
+ * 时才多读几个字符。
+ *
+ * 按 RFC 9110 §12.5.3 区分"头缺失"与"头为空"这两种不同情形：
+ *   - 头缺失：任意编码皆可接受，返回 true（默认压缩）；
+ *   - 头存在但为空串：表示客户端不想要任何内容编码，返回 false。
+ *
+ * @param {string|undefined} ae accept-encoding 头
+ * @returns {boolean}
+ */
+function acceptGzip(ae) {
+  //头缺失：未表达偏好，视为接受
+  if (ae === undefined || ae === null) return true
+
+  //头存在但为空：明确表示不要任何内容编码
+  if (typeof ae !== 'string' || ae.length === 0) return false
+
+  let r = probeGzip(ae)
+  if (r !== null) return r
+
+  //编码名大小写不敏感（RFC 9110 §8.4.1）。实际几乎都是小写，因此把
+  //toLowerCase 的代价推迟到快路径没命中时才付出，常见路径零分配。
+  let low = ae.toLowerCase()
+  if (low === ae) return false
+
+  return probeGzip(low) === true
+}
+
+/**
+ * 先查 gzip，没有再查通配 *。
+ * @returns {boolean|null} 两者都未出现时返回 null
+ */
+function probeGzip(ae) {
+  let ok = codingAcceptable(ae, 'gzip')
+  if (ok !== null) return ok
+
+  return codingAcceptable(ae, '*')
+}
+
+/**
+ * 在 accept-encoding 中查找某个编码名，返回它是否可接受。
+ *
+ * @param {string} ae   accept-encoding 头
+ * @param {string} name 编码名，如 'gzip' 或 '*'
+ * @returns {boolean|null} 未出现返回 null；出现且 q 不为 0 返回 true；q 为 0 返回 false
+ */
+function codingAcceptable(ae, name) {
+  let from = 0
+
+  while (true) {
+    let i = ae.indexOf(name, from)
+    if (i < 0) return null
+
+    //必须是完整的 token：左右两侧只能是串首/串尾、逗号或空白
+    let lok = i === 0 || ae[i-1] === ',' || ae[i-1] === ' ' || ae[i-1] === '\t'
+    let e = i + name.length
+    let rc = ae[e]
+    let rok = e >= ae.length || rc === ',' || rc === ';' || rc === ' ' || rc === '\t'
+
+    if (!lok || !rok) { from = i + 1; continue }
+
+    //跳过空白，看有没有参数
+    let j = e
+    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
+
+    if (ae[j] !== ';') return true
+
+    //解析 ;q=xxx —— 只需要区分"是不是 0"
+    j++
+    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
+
+    if ((ae[j] !== 'q' && ae[j] !== 'Q')) return true
+
+    j++
+    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
+    if (ae[j] !== '=') return true
+
+    j++
+    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
+
+    //q=0、q=0.0、q=0.000 均为不可接受；q=0.001 仍然可接受
+    if (ae[j] !== '0') return true
+
+    j++
+    if (ae[j] !== '.') return false
+
+    j++
+    while (j < ae.length && ae[j] === '0') j++
+
+    let c = ae[j]
+    return !(c === undefined || c === ',' || c === ';' || c === ' ' || c === '\t')
+  }
+}
+
 /**
  * 处理静态资源的请求，需要把中间件挂载到一个分组下，否则会影响全局，如果一个只做静态分发的服务则可以全局启用。
  */
@@ -220,22 +322,93 @@ class Resource {
   }
 
   removeNameCache(name) {
-    let keys = this.cache.keys()
-    for (let k of keys) {
-      if (k.lastIndexOf(name) >= 0) this.cache.delete(k)
+    //收集后再删：删除时要同步扣减 this.size，走 removeCache 统一记账
+    let hit = []
+    for (let k of this.cache.keys()) {
+      if (k.lastIndexOf(name) >= 0) hit.push(k)
     }
+
+    for (let k of hit) this.removeCache(k)
   }
 
   removeCache(filepath) {
-    if (this.cache.has(filepath)) {
-      this.cache.delete(filepath)
-    }
+    let r = this.cache.get(filepath)
+    if (r === undefined) return
+
+    this.size -= r.data.length + (r.zdata ? r.zdata.length : 0)
+    if (this.size < 0) this.size = 0
+
+    this.cache.delete(filepath)
   }
 
   clearCache() {
     this.size = 0
     this.cacheFailed = 0
     this.cache.clear()
+  }
+
+  /**
+   * 当前是否还能接纳新的缓存条目。
+   *
+   * 必须在读取文件**之前**问一次：二进制分支为了填缓存会把整个文件累积到
+   * 内存再 Buffer.concat，缓存满时那份数据读完即弃，白白分配两倍文件大小，
+   * 且每个请求都来一遍。
+   */
+  canCache() {
+    if (this.cacheFailed >= this.failedLimit) return false
+
+    if (this.maxCacheSize > 0 && this.size >= this.maxCacheSize) return false
+
+    return true
+  }
+
+  /**
+   * 缓存未能接纳新条目时的记账。
+   *
+   * 失败计数达到阈值后，以 prob% 的概率整体清空——这是刻意的：缓存键来自
+   * 外部可控的请求路径，用 LRU 反而容易被构造大量冷门路径挤掉热点，
+   * 概率性全清让攻击者无法预测何时生效。
+   */
+  noteCacheFull() {
+    if (this.cacheFailed >= this.failedLimit) {
+      if (((Math.random() * 100) | 0) < this.prob) {
+        this.clearCache()
+        this.cacheFailed = 0
+      } else {
+        this.cacheFailed--
+      }
+    } else if (this.maxCacheSize > 0 && this.size >= this.maxCacheSize) {
+      if (this.cacheFailed < 1000_0000) this.cacheFailed++
+    }
+  }
+
+  /**
+   * 表示（representation）各自的 ETag。
+   *
+   * 原文与 gzip 版本是同一资源的两种表示，字节不同，必须给不同的 ETag，
+   * 否则中间缓存会用一种表示去应答另一种表示的条件请求。
+   */
+  etagOf(size, hash, gzip) {
+    return gzip ? `"${size}-${hash}-gz"` : `"${size}-${hash}"`
+  }
+
+  /**
+   * If-None-Match 匹配。RFC 9110：支持 * 与逗号分隔的多值。
+   */
+  etagMatch(inm, etag) {
+    if (!inm) return false
+    if (inm === '*') return true
+
+    return inm.split(',').map(v => v.trim()).includes(etag)
+  }
+
+  /**
+   * 写入一条缓存。原文与 gzip 版本同时保留：两种表示都可能被请求，
+   * 只存压缩版会导致不接受 gzip 的客户端拿不到可用内容。
+   */
+  setCache(key, entry) {
+    this.cache.set(key, entry)
+    this.size += entry.data.length + (entry.zdata ? entry.zdata.length : 0)
   }
 
   async pipeData(pathfile, ctx, filesize) {
@@ -309,38 +482,43 @@ class Resource {
           if (!fst || fst.size !== r.size || fst.mtimeMs !== r.mtime) {
             // 文件被删或变更 → 失效，删条目走下方新鲜读取
             self.cache.delete(real_path)
-            self.size -= r.data.length
+            self.size -= r.data.length + (r.zdata ? r.zdata.length : 0)
           } else {
             r.checkTime = Date.now()
           }
         }
 
         if (self.cache.has(real_path)) {
-          let etag = `"${r.size}-${r.hash}"`
-          let inm = c.headers['if-none-match']
+          //有压缩版本时才按 accept-encoding 二选一，否则只有原文一种表示
+          let useZip = r.zdata !== null && acceptGzip(c.headers['accept-encoding'])
+          let body = useZip ? r.zdata : r.data
+          let etag = self.etagOf(r.size, r.hash, useZip)
 
-          // RFC 9110：If-None-Match 支持 * 与逗号分隔的多值
-          if (inm && (inm === '*' || inm.split(',').map(s => s.trim()).includes(etag))) {
-            c.setHeader('etag', etag)
-            if (self.cacheControl) {
-              c.setHeader('cache-control', self.cacheControl)
-            }
-            return c.status(304).to('')
-          }
-
-          c.setHeader('content-type', r.type)
-          c.setHeader('content-length', r.data.length)
-          c.setHeader('etag', etag)
-
-          if (r.gzip) {
-            c.setHeader('content-encoding', 'gzip')
+          if (r.zdata !== null) {
+            //响应内容随 accept-encoding 变化，共享缓存必须按该头分别存储，
+            //否则会把 gzip 版本发给不接受 gzip 的客户端
+            c.setHeader('vary', 'accept-encoding')
           }
 
           if (self.cacheControl) {
             c.setHeader('cache-control', self.cacheControl)
           }
 
-          return c.to(r.data)
+          // RFC 9110：If-None-Match 支持 * 与逗号分隔的多值
+          if (self.etagMatch(c.headers['if-none-match'], etag)) {
+            c.setHeader('etag', etag)
+            return c.status(304).to('')
+          }
+
+          c.setHeader('content-type', r.type)
+          c.setHeader('content-length', body.length)
+          c.setHeader('etag', etag)
+
+          if (useZip) {
+            c.setHeader('content-encoding', 'gzip')
+          }
+
+          return c.to(body)
         }
       }
 
@@ -375,47 +553,79 @@ class Resource {
           // 内容摘要：基于原文计算，发送前带上 ETag（数据在手，顺带计算）
           hash = crypto.createHash('sha1').update(data).digest('hex')
 
-          // 缓存未命中但客户端带 If-None-Match：内容未变则 304，避免重发全量
-          let etag = `"${fst.size}-${hash}"`
-          let inm = c.headers['if-none-match']
-          if (inm && (inm === '*' || inm.split(',').map(s => s.trim()).includes(etag))) {
-            c.setHeader('etag', etag)
-            if (self.cacheControl) {
-              c.setHeader('cache-control', self.cacheControl)
-            }
-            return c.status(304).to('')
+          let wantZip = acceptGzip(c.headers['accept-encoding'])
+
+          /**
+           * 压缩时机：只要文件够大就压。
+           *
+           * 即使本次请求不接受 gzip，压缩结果也会随缓存一起留下，供后续接受
+           * gzip 的请求直接取用——压缩成本摊到往后所有命中上。仅当这条记录
+           * 根本进不了缓存时，不接受 gzip 的请求才跳过压缩，避免纯浪费。
+           *
+           * 小于 1K 的文件压完往往比原文还大，不压。
+           */
+          let cacheable = self.canCache()
+
+          if (fst.size > 1024 && (wantZip || cacheable)) {
+            zipdata = await new Promise((rv, rj) => {
+                zlib.gzip(data, (err, d) => {
+                  if (err) {
+                    rj(err)
+                  } else {
+                    rv(d)
+                  }
+                })
+            }).catch(err => {
+              zipdata = null
+            })
+
+            //压完反而更大就丢掉，没有保留价值
+            if (zipdata && zipdata.length >= data.length) zipdata = null
           }
 
-          //若文件很小，压缩后的数据很可能要比源文件还大，所以对超过1k的文件进行压缩，否则不进行压缩。
-          if (fst.size > 1024) {
-              zipdata = await new Promise((rv, rj) => {
-                  zlib.gzip(data, (err, d) => {
-                    if (err) {
-                      rj(err)
-                    } else {
-                      rv(d)
-                    }
-                  })
-              }).catch(err => {
-                zipdata = null
-              })
-          }
+          let useZip = zipdata !== null && wantZip
+          let body = useZip ? zipdata : data
+          let etag = self.etagOf(fst.size, hash, useZip)
 
-          c.setHeader('content-type', ctype)
-            .setHeader('content-length', zipdata ? zipdata.length : data.length)
-            .setHeader('etag', etag)
-
-          if (zipdata) {
-            c.setHeader('content-encoding', 'gzip')
+          if (zipdata !== null) {
+            c.setHeader('vary', 'accept-encoding')
           }
 
           self.cacheControl && c.setHeader('cache-control', self.cacheControl);
 
-          c.sendHeader().to(zipdata || data)
+          // 缓存未命中但客户端带 If-None-Match：内容未变则 304，避免重发全量
+          if (self.etagMatch(c.headers['if-none-match'], etag)) {
+            c.setHeader('etag', etag)
+            return c.status(304).to('')
+          }
+
+          c.setHeader('content-type', ctype)
+            .setHeader('content-length', body.length)
+            .setHeader('etag', etag)
+
+          if (useZip) {
+            c.setHeader('content-encoding', 'gzip')
+          }
+
+          c.sendHeader().to(body)
         } else {
           c.setHeader('content-type', ctype).setHeader('content-length', fst.size);
 
           self.cacheControl && c.setHeader('cache-control', self.cacheControl);
+
+          /**
+           * 缓存进不去时纯流式发送，不累积。
+           *
+           * pipeData() 一边 pipe 一边把全部 chunk 收进数组再 Buffer.concat，
+           * 那份数据唯一的用途就是填缓存；缓存满时它读完即弃，等于每个请求
+           * 都白白分配两倍文件大小。判断必须前置到这里。
+           */
+          if (!self.canCache()) {
+            self.noteCacheFull()
+            c.sendHeader()
+
+            return await c.pipe(pathfile)
+          }
 
           // 头部已随流发出，读取失败时无法再回退 404，只能直接终止响应
           data = await this.pipeData(pathfile, c, fst.size).catch(() => {
@@ -426,36 +636,23 @@ class Resource {
           if (!data) return
         }
 
-        if (self.cacheFailed >= self.failedLimit) {
-          //以{self.prob}%概率决定是否释放缓存。
-          if (((Math.random() * 100) | 0) < self.prob) {
-            self.clearCache()
-            self.cacheFailed = 0
-          } else {
-            self.cacheFailed--
-          }
-        } else if (self.maxCacheSize > 0 && self.size >= self.maxCacheSize) {
-
-          if (self.cacheFailed < 1000_0000)
-            self.cacheFailed++
-
+        if (!self.canCache()) {
+          self.noteCacheFull()
         } else {
           // 内容摘要：文本分支已提前计算；二进制分支（响应已流式发出）在此补算
           if (hash === null) {
             hash = crypto.createHash('sha1').update(data).digest('hex')
           }
 
-          self.cache.set(real_path, {
-            data : zipdata || data,
+          self.setCache(real_path, {
+            data : data,            // 始终是原文
+            zdata : zipdata,        // gzip 版本，没有则为 null
             type : ctype,
-            gzip : zipdata ? true : false,
             size : fst.size,        // 本地变更检测：大小
             mtime : fst.mtimeMs,    // 本地变更检测：修改时间
             hash : hash,            // 前端 ETag：内容摘要
             checkTime : Date.now(), // 最近 stat 校验时间
           })
-
-          self.size += zipdata ? zipdata.length : data.length
         }
       } catch (err) {
         c.status(404).to('read file failed')

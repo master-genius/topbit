@@ -13,6 +13,10 @@ class Http2Pool {
     this.maxAliveStreams = options.maxAliveStreams || 100 // 单连接最大并发流
     this.url = options.url
     this.debug = !!options.debug
+    /**
+     * 重连退避的基准单位（毫秒）。实际间隔 = 基准 × 阶梯倍数。
+     * 调小它可以整体加快重连节奏（测试里常用），阶梯形状不变。
+     */
     this.reconnDelay = options.reconnDelay || 500
 
     // 常驻连接数：零流量时保持不关闭（仅 ping 保活），异常断开后低于此值自动补连。
@@ -20,8 +24,26 @@ class Http2Pool {
     // 且“手里有活连接”本身就是后端可达的状态信号（ok() 据此判定健康），
     // 因此常驻名额内的连接不做空闲回收；设为 0 可关闭常驻。
     this.minConnect = options.minConnect === undefined ? 2 : options.minConnect
-    // 指数退避上限：重连间隔从 reconnDelay 起翻倍，封顶于此
-    this.reconnMaxDelay = options.reconnMaxDelay || 30_000
+    /**
+     * 重连退避阶梯，单位是 reconnDelay 的倍数。
+     * 默认 500ms → 1s → 2s → 4s → 8s → 16s，走完最后一级后回到第一级循环。
+     *
+     * 为什么循环而不是单调递增后停在封顶值：后端不可用的绝大多数原因是重启
+     * 或短暂抖动，恢复时间以秒计。单调递增的退避一旦爬到最大间隔就再也不回头，
+     * 后端早已恢复却还要空等一整个长间隔才被发现——这个可用性窟窿完全由退避
+     * 策略自己造成。循环阶梯既避免了定频重连风暴（多数尝试落在长间隔上），
+     * 又保证每轮都有一次快速探测，恢复延迟因此有上界。
+     */
+    this.reconnLadder = [1, 2, 4, 8, 16, 32]
+
+    if (Array.isArray(options.reconnLadder)
+        && options.reconnLadder.length > 0
+        && options.reconnLadder.every(v => typeof v === 'number' && v > 0))
+    {
+      this.reconnLadder = options.reconnLadder.slice()
+    } else if (options.reconnLadder !== undefined) {
+      console.error(`reconnLadder 必须是元素均为正数的非空数组: ${JSON.stringify(options.reconnLadder)}`)
+    }
     // 新建连接的握手等待上限（对应代理配置项 connectTimeout）
     this.connectTimeout = options.connectTimeout || 5000
     // 无可用配额时，请求在等待队列中的滞留上限
@@ -169,13 +191,15 @@ class Http2Pool {
   }
 
   /**
-   * 指数退避重连：同一时刻只保留一个在途任务，避免后端宕机时的定频重连风暴
+   * 退避重连：同一时刻只保留一个在途任务，避免后端宕机时的定频重连风暴。
+   * 间隔按 reconnLadder 逐级放大，走完一轮回到第一级重新开始。
    */
   _scheduleReconnect() {
     if (this._reconnTimer) return
     if (this.sessions.length >= this.maxConnect) return
 
-    const delay = Math.min(this.reconnDelay * Math.pow(2, this._reconnAttempts), this.reconnMaxDelay)
+    const ladder = this.reconnLadder
+    const delay = this.reconnDelay * ladder[this._reconnAttempts % ladder.length]
     this._reconnAttempts++
 
     this._reconnTimer = setTimeout(() => {
