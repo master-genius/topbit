@@ -97,10 +97,19 @@ app.run(PORT);
         c1.headers['content-encoding'] === undefined && c1.buf.toString() === TEXT,
         String(c1.headers['content-encoding']));
 
-  //5) q=0 明确拒绝
+  //5) 不含 gzip 的编码列表 → 不压缩
+  let nz = await req('/s/big.txt', {'accept-encoding': 'br, deflate'});
+  check('列表中无 gzip 时不压缩',
+        nz.headers['content-encoding'] === undefined && nz.buf.toString() === TEXT,
+        String(nz.headers['content-encoding']));
+
+  //5b) q 值不参与判定——只看 gzip 是否出现。
+  //    刻意的简化：不想接收压缩的客户端本就不该在头里声明支持 gzip。
   let q0 = await req('/s/big.txt', {'accept-encoding': 'gzip;q=0, identity'});
-  check('gzip;q=0 视为拒绝，返回原文',
-        q0.headers['content-encoding'] === undefined && q0.buf.toString() === TEXT);
+  check('q 值不参与判定，出现 gzip 即压缩',
+        q0.headers['content-encoding'] === 'gzip' &&
+        zlib.gunzipSync(q0.buf).toString() === TEXT,
+        String(q0.headers['content-encoding']));
 
   //=========== 已缓存（再次请求，走缓存分支）===========
 

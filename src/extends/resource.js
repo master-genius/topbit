@@ -53,16 +53,14 @@ let _typemap = {
 /**
  * 判断客户端是否接受 gzip 编码。
  *
- * 只回答"能不能发 gzip"这一个布尔问题，不做完整的 RFC 9110 q 值排序——
- * 静态分发在 gzip 与原文之间二选一，排序没有意义。
+ * 只看 accept-encoding 里有没有出现 gzip，不解析 q 值、不做 token 边界判定。
+ * 这是刻意的简化：不想接收压缩内容的客户端，本就应当不在头里声明支持 gzip；
+ * 用 q=0 表达"我认得但别发给我"是极少见的写法，为它引入一套字符级解析器
+ * 不划算。
  *
- * 性能：绝大多数请求的头是 'gzip, deflate, br' 这类形式，一次 indexOf 即可
- * 判定，不切分字符串、不产生任何中间对象；只有在编码名后面真的跟着 ';q='
- * 时才多读几个字符。
- *
- * 按 RFC 9110 §12.5.3 区分"头缺失"与"头为空"这两种不同情形：
- *   - 头缺失：任意编码皆可接受，返回 true（默认压缩）；
- *   - 头存在但为空串：表示客户端不想要任何内容编码，返回 false。
+ * 头缺失与头为空是两种不同情形（RFC 9110 §12.5.3）：
+ *   - 缺失：未表达偏好，任意编码皆可接受，压缩；
+ *   - 存在但为空串：明确表示不要任何内容编码，不压缩。
  *
  * @param {string|undefined} ae accept-encoding 头
  * @returns {boolean}
@@ -74,81 +72,7 @@ function acceptGzip(ae) {
   //头存在但为空：明确表示不要任何内容编码
   if (typeof ae !== 'string' || ae.length === 0) return false
 
-  let r = probeGzip(ae)
-  if (r !== null) return r
-
-  //编码名大小写不敏感（RFC 9110 §8.4.1）。实际几乎都是小写，因此把
-  //toLowerCase 的代价推迟到快路径没命中时才付出，常见路径零分配。
-  let low = ae.toLowerCase()
-  if (low === ae) return false
-
-  return probeGzip(low) === true
-}
-
-/**
- * 先查 gzip，没有再查通配 *。
- * @returns {boolean|null} 两者都未出现时返回 null
- */
-function probeGzip(ae) {
-  let ok = codingAcceptable(ae, 'gzip')
-  if (ok !== null) return ok
-
-  return codingAcceptable(ae, '*')
-}
-
-/**
- * 在 accept-encoding 中查找某个编码名，返回它是否可接受。
- *
- * @param {string} ae   accept-encoding 头
- * @param {string} name 编码名，如 'gzip' 或 '*'
- * @returns {boolean|null} 未出现返回 null；出现且 q 不为 0 返回 true；q 为 0 返回 false
- */
-function codingAcceptable(ae, name) {
-  let from = 0
-
-  while (true) {
-    let i = ae.indexOf(name, from)
-    if (i < 0) return null
-
-    //必须是完整的 token：左右两侧只能是串首/串尾、逗号或空白
-    let lok = i === 0 || ae[i-1] === ',' || ae[i-1] === ' ' || ae[i-1] === '\t'
-    let e = i + name.length
-    let rc = ae[e]
-    let rok = e >= ae.length || rc === ',' || rc === ';' || rc === ' ' || rc === '\t'
-
-    if (!lok || !rok) { from = i + 1; continue }
-
-    //跳过空白，看有没有参数
-    let j = e
-    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
-
-    if (ae[j] !== ';') return true
-
-    //解析 ;q=xxx —— 只需要区分"是不是 0"
-    j++
-    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
-
-    if ((ae[j] !== 'q' && ae[j] !== 'Q')) return true
-
-    j++
-    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
-    if (ae[j] !== '=') return true
-
-    j++
-    while (j < ae.length && (ae[j] === ' ' || ae[j] === '\t')) j++
-
-    //q=0、q=0.0、q=0.000 均为不可接受；q=0.001 仍然可接受
-    if (ae[j] !== '0') return true
-
-    j++
-    if (ae[j] !== '.') return false
-
-    j++
-    while (j < ae.length && ae[j] === '0') j++
-
-    let c = ae[j]
-    return !(c === undefined || c === ',' || c === ';' || c === ' ' || c === '\t')
-  }
+  return ae.indexOf('gzip') >= 0
 }
 
 /**

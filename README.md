@@ -1721,8 +1721,10 @@ Text-ish resources (`text/*`, `.json`, `font/*`) larger than 1KB are gzipped. Wh
 |---|---|
 | Absent | Compress (RFC 9110 §12.5.3: no stated preference means any coding is acceptable) |
 | Present but empty | Do not compress (the client explicitly wants no content coding) |
-| Contains `gzip` or `*` with a non-zero q | Compress |
-| Anything else (`identity`, `br, deflate`, `gzip;q=0`) | Do not compress |
+| Contains `gzip` | Compress |
+| Anything else (`identity`, `br, deflate`) | Do not compress |
+
+The check is simply whether `gzip` appears; **q-values are not parsed**. This is deliberate: a client that does not want compressed content should not advertise gzip in the first place, and using `gzip;q=0` to say "I know it but don't send it" is rare enough that a character-level parser is not worth its weight. So `accept-encoding: gzip;q=0` still yields a compressed response.
 
 The cache keeps **both the raw and the gzipped bytes** and picks per request, so a client that does not accept gzip never receives compressed bytes. The two are distinct representations of the same resource: their ETags differ (the compressed one ends in `-gz`), responses carry `Vary: accept-encoding`, and conditional requests are evaluated against whichever representation would be sent. A compressed result that ends up larger than the original is discarded.
 
