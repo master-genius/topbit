@@ -61,13 +61,13 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
 
   //---------- 明文 ----------
   const app1 = new Topbit({parseBody: false});
-  const px1 = new Proxy({ port: P.plain, host: hostCfg(`a.test:${P.plain}`) });
+  const px1 = new Proxy({ port: P.plain, config: hostCfg(`a.test:${P.plain}`) });
   px1.init(app1);
   app1.run(P.plain);
 
   //---------- TLS ----------
   const app2 = new Topbit({parseBody: false, https: true, key: KEY, cert: CERT});
-  const px2 = new Proxy({ port: P.tls, host: hostCfg(`b.test:${P.tls}`) });
+  const px2 = new Proxy({ port: P.tls, config: hostCfg(`b.test:${P.tls}`) });
   px2.init(app2);
   app2.run(P.tls);
 
@@ -77,7 +77,7 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
     port: P.custom,
     realHostHeader: 'X-Gw-Host',
     realProtoHeader: 'X-Gw-Proto',
-    host: hostCfg(`c.test:${P.custom}`)
+    config: hostCfg(`c.test:${P.custom}`)
   });
   px3.init(app3);
   app3.run(P.custom);
@@ -123,7 +123,7 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
 
   const pxT = new Proxy({
     port: 0,
-    host: { 'd.test': [{ path: '/p', url: `http://127.0.0.1:${P.backend}`,
+    config: { 'd.test': [{ path: '/p', url: `http://127.0.0.1:${P.backend}`,
                          aliveCheckPath: '/', aliveCheckInterval: 1 }] }
   });
   const appT = new Topbit({parseBody: false});
@@ -153,7 +153,7 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   //---- ProxyNoAgent 同构 ----
   const pxN = new ProxyNoAgent({
     port: 0,
-    host: { 'e.test': [{ path: '/p', url: `http://127.0.0.1:${P.backend}`,
+    config: { 'e.test': [{ path: '/p', url: `http://127.0.0.1:${P.backend}`,
                          aliveCheckPath: '/', aliveCheckInterval: 1 }] }
   });
   pxN.init(new Topbit({parseBody: false}));
@@ -161,6 +161,20 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
         typeof pxN.startAliveCheck === 'function' && typeof pxN.stopAliveCheck === 'function');
   pxN.stopAliveCheck();
   check('ProxyNoAgent stopAliveCheck() 生效', countTimers(pxN) === 0);
+
+  //---- 三扩展的配置选项统一为 config ----
+  {
+    const cfg = { 'z.test': [{ path: '/p', url: `http://127.0.0.1:${P.backend}` }] };
+
+    for (const [name, Cls] of [['Proxy', Proxy], ['ProxyNoAgent', ProxyNoAgent],
+                               ['Http2Proxy', Topbit.extensions.Http2Proxy]]) {
+      const px = new Cls({ port: 0, config: JSON.parse(JSON.stringify(cfg)) });
+      check(`${name} 接受 config 选项`,
+            Object.keys(px.pathTable).includes('/p/*'),
+            JSON.stringify(Object.keys(px.pathTable)));
+      if (typeof px.stopAliveCheck === 'function') px.stopAliveCheck();
+    }
+  }
 
   //---- 停止之后事件循环不该被存活检测拖住 ----
   px1.stopAliveCheck(); px2.stopAliveCheck(); px3.stopAliveCheck();

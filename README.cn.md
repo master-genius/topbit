@@ -2071,7 +2071,7 @@ pxy.init(app)
 
 | 选项 | 默认值 | 说明 |
 |---|---|---|
-| `config` / `host` | `{}` | 代理配置表，key 为 host，value 为字符串、对象或对象数组 |
+| `config` | `{}` | 代理配置表，key 为 host，value 为字符串、对象或对象数组 |
 | `port` | `''` | 服务监听端口，用于自动拼接 config 的 key，见上文 |
 | `defaultServer` | `''` | Host 未命中时的回退目标 host，见上文 |
 | `timeout` | `35000` | 单次后端请求的超时（毫秒），可被后端配置项 `timeout` 覆盖 |

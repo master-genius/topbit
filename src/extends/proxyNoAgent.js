@@ -289,7 +289,6 @@ class ProxyNoAgent {
           }
           break
 
-        case 'host':
         case 'config':
           this.config = options[k]
           break
@@ -360,7 +359,12 @@ class ProxyNoAgent {
           }
           break
 
-        default:;
+        default:
+          //未知选项静默忽略会让拼错的 key 表现为"配置没生效"，且全程无提示。
+          //延迟输出：构造期可能还在刷其他启动信息，晚一点更容易被看到。
+          setTimeout(() => {
+            console.error(`\x1b[7m!!proxy 未知选项: ${k}\n!!请查看文档使用正确的选项。\n\x1b[0m`)
+          }, 500)
       }
     }
 

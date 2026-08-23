@@ -2029,7 +2029,7 @@ pxy.init(app)
 
 | Option | Default | Description |
 |---|---|---|
-| `config` / `host` | `{}` | Proxy table; key is a host, value is a string, object, or array of objects |
+| `config` | `{}` | Proxy table; key is a host, value is a string, object, or array of objects |
 | `port` | `''` | Listening port, used to auto-append to the keys of `config`; see above |
 | `defaultServer` | `''` | Fallback host when the Host does not match; see above |
 | `timeout` | `35000` | Timeout for a single backend request (ms); can be overridden per backend |
