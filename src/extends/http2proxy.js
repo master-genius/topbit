@@ -398,7 +398,7 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
 
   }
 
-  if (tmp.resHeaders && typeof tmp.resHeaders === 'object' && !(tmp.resHeaders instanceof Array)) {
+  if (tmp.resHeaders && typeof tmp.resHeaders === 'object' && !Array.isArray(tmp.resHeaders)) {
     backend_obj.resHeaders = tmp.resHeaders
   }
 
@@ -532,7 +532,7 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
           useWeight : false
         }
 
-      } else if (this.hostProxy[keys[0]][pt] instanceof Array) {
+      } else if (Array.isArray(this.hostProxy[keys[0]][pt])) {
         this.hostProxy[keys[0]][pt].push(backend_obj)
       }
 

@@ -78,7 +78,7 @@ class TopbitLoader1 {
 
       if (k === 'subgroup') {
         if (typeof options[k] === 'string') options[k] = [ options[k] ];
-        if (options[k] instanceof Array) {
+        if (Array.isArray(options[k])) {
           this.config.subgroup = options[k];
         }
         this._fmtSubGroup();
@@ -150,7 +150,7 @@ class TopbitLoader1 {
   }
 
   _fmtSubGroup() {
-    if (!(this.config.subgroup instanceof Array)) return;
+    if (!Array.isArray(this.config.subgroup)) return;
     let a;
     for (let i = 0; i < this.config.subgroup.length; i++) {
       a = this.config.subgroup[i];
@@ -625,7 +625,7 @@ class TopbitLoader1 {
 
         if (files[i].name[0] == '!') continue;
 
-        if (this.config.subgroup instanceof Array) {
+        if (Array.isArray(this.config.subgroup)) {
             if (this.config.subgroup.indexOf(files[i].name) < 0) continue;
         }
 
@@ -644,7 +644,7 @@ class TopbitLoader1 {
         if (files[i].name.length < 4) continue;
         if (files[i].name.substring(files[i].name.length-3) !== '.js') continue;
 
-        if (this.config.subgroup instanceof Array && deep < 1) {
+        if (Array.isArray(this.config.subgroup) && deep < 1) {
           if (this.config.subgroup.indexOf('') < 0 && this.config.subgroup.indexOf('/') < 0) {
             continue;
           }

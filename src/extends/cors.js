@@ -98,7 +98,7 @@ class Cors {
           break;
 
         case 'methods':
-          if ((options[k] instanceof Array) || typeof options[k] === 'string') {
+          if (Array.isArray(options[k]) || typeof options[k] === 'string') {
             this.methods = options[k];
           }
 
@@ -135,7 +135,7 @@ class Cors {
       }
     }
 
-    if (this.methods instanceof Array) {
+    if (Array.isArray(this.methods)) {
       this.methodString = this.methods.join(',');
     } else {
       this.methodString = this.methods;

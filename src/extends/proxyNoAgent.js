@@ -442,10 +442,10 @@ class ProxyNoAgent {
       if (typeof cfg[k] === 'string') {
         cfg[k] = [ { path : '/', url : cfg[k] } ]
 
-      } else if (!(cfg[k] instanceof Array) && typeof cfg[k] === 'object') {
+      } else if (!Array.isArray(cfg[k]) && typeof cfg[k] === 'object') {
         cfg[k] = [ cfg[k] ]
 
-      } else if ( !(cfg[k] instanceof Array) ) {
+      } else if (!Array.isArray(cfg[k])) {
         continue
       }
       /**
@@ -459,7 +459,7 @@ class ProxyNoAgent {
         for (let i = 0; i < cfg[k].length; i++) {
           tmp = cfg[k][i]
 
-          if (typeof tmp !== 'object' || (tmp instanceof Array) ) {
+          if (typeof tmp !== 'object' || Array.isArray(tmp)) {
             console.error(`${k} ${JSON.stringify(tmp)} 错误的配置格式`)
             continue
           }
@@ -542,7 +542,7 @@ class ProxyNoAgent {
           }
 
           if (tmp.resHeaders !== undefined) {
-            if (typeof tmp.resHeaders === 'object' && !(tmp.resHeaders instanceof Array)) {
+            if (typeof tmp.resHeaders === 'object' && !Array.isArray(tmp.resHeaders)) {
               backend_obj.resHeaders = tmp.resHeaders
             } else {
               console.error(
@@ -581,7 +581,7 @@ class ProxyNoAgent {
               useWeight : false
             }
 
-          } else if (this.hostProxy[keys[0]][pt] instanceof Array) {
+          } else if (Array.isArray(this.hostProxy[keys[0]][pt])) {
             this.hostProxy[keys[0]][pt].push(backend_obj)
           }
 

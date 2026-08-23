@@ -14,7 +14,7 @@ class Referer {
     for (let k in options) {
       switch (k) {
         case 'allow':
-          if (options[k] === '*' || (options[k] instanceof Array)) {
+          if (options[k] === '*' || Array.isArray(options[k])) {
             this.allow = options[k];
           }
           break;

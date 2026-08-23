@@ -135,7 +135,7 @@ class TopbitToken {
         }
       }
 
-    } else if (tid instanceof Array) {
+    } else if (Array.isArray(tid)) {
 
       for (let i=0; i < tid.length; i++) {
         if (this.tokenIds.indexOf(tid[i]) < 0) {
