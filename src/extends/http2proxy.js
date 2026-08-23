@@ -174,7 +174,6 @@ function fallbackPaths(routepath) {
 }
 
 let Http2Proxy = function (options = {}) {
-
   if (!(this instanceof Http2Proxy)) return Http2Proxy(options)
 
   if (typeof options !== 'object') options = {}
@@ -344,14 +343,13 @@ Http2Proxy.prototype.fmtConfig = function (cfg, k) {
     cfg[k] = [
       { path : '/', url : cfg[k] }
     ]
-  } else if (! (cfg[k] instanceof Array) ) {
+  } else if (!Array.isArray(cfg[k])) {
     cfg[k] = [ cfg[k] ]
   }
 }
 
 Http2Proxy.prototype.checkConfig = function (tmp, k) {
-
-  if (typeof tmp !== 'object' || (tmp instanceof Array) ) {
+  if (typeof tmp !== 'object' || Array.isArray(tmp)) {
     console.error(`${k} ${JSON.stringify(tmp)} 错误的配置格式`)
     return false
   }
@@ -444,7 +442,6 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
   let tmp_cfg
 
   for (let k in cfg) {
-
     // 80/443 场景确保裸 + 带端口双 key 共享（key 裸则补带端口，key 带端口则补裸）；
     // port 为空但 key 带 :80/:443 后缀也补裸；其他端口裸 key 替换为带端口
     let keys = [k]
@@ -757,232 +754,232 @@ Http2Proxy.prototype.mid = function () {
 
         try {
 
-        // ctx.stream 的类型随服务形态不同：
-        // 纯 h2：ServerHttp2Stream（本体即 h2 流）；
-        // ALPN h2：Http2ServerResponse（底层 h2 流在 .stream 属性上）；
-        // ALPN h1 / 纯 h1：ServerResponse 或不存在 → 归一化为 null，走 h1 分支。
-        // 判别只用文档化属性（.stream + c.major），跨 Node 版本安全
-        let request_stream = null
-        if (c.major > 1 && c.stream) {
-          request_stream = c.stream.stream || c.stream
-        }
+          // ctx.stream 的类型随服务形态不同：
+          // 纯 h2：ServerHttp2Stream（本体即 h2 流）；
+          // ALPN h2：Http2ServerResponse（底层 h2 流在 .stream 属性上）；
+          // ALPN h1 / 纯 h1：ServerResponse 或不存在 → 归一化为 null，走 h1 分支。
+          // 判别只用文档化属性（.stream + c.major），跨 Node 版本安全
+          let request_stream = null
+          if (c.major > 1 && c.stream) {
+            request_stream = c.stream.stream || c.stream
+          }
 
-        let stm = null
+          let stm = null
 
-        stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
-                      .catch(err => {
-                          failsafe(err)
-                          stm = null
-                      })
+          stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
+                        .catch(err => {
+                            failsafe(err)
+                            stm = null
+                        })
 
-        // 建流失败时 failsafe 已 reject，这里只做兜底（避免 catch 未触发却拿到空值）
-        if (!stm) {
-          failsafe(new Error('request failed'))
-          return
-        }
+          // 建流失败时 failsafe 已 reject，这里只做兜底（避免 catch 未触发却拿到空值）
+          if (!stm) {
+            failsafe(new Error('request failed'))
+            return
+          }
 
-        if (request_stream) {
-          // h2 下游：close 是所有终止路径（正常/超时/取消/错误）的统一出口，
-          // rstCode 携带取消原因，不再监听冗余的 aborted
-          request_stream.on('timeout', () => {
-            stm.close(http2.constants.NGHTTP2_CANCEL)
+          if (request_stream) {
+            // h2 下游：close 是所有终止路径（正常/超时/取消/错误）的统一出口，
+            // rstCode 携带取消原因，不再监听冗余的 aborted
+            request_stream.on('timeout', () => {
+              stm.close(http2.constants.NGHTTP2_CANCEL)
+            })
+
+            request_stream.on('close', () => {
+              if (request_stream.rstCode !== http2.constants.NGHTTP2_NO_ERROR) {
+                stm.close(request_stream.rstCode)
+              }
+            })
+
+            request_stream.on('error', err => {
+              stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+              stm.destroy()
+            })
+          } else if (c.res && typeof c.res.on === 'function') {
+            // h1 下游：响应未完成即关闭 = 客户端提前断开 → 终止上游流。
+            // 'close' 覆盖正常/中断全部路径，writableEnded 为判别依据；
+            // 不用已弃用的 'aborted'/req.aborted，也不用 destroyed
+            // （流正常完成后 destroyed 同样为 true，会把正常响应误判为中断）
+            c.res.on('close', () => {
+              if (!c.res.writableEnded && !stm.destroyed) stm.destroy()
+            })
+          }
+
+          stm.setTimeout(pr.timeout, () => {
+            //stm.close(http2.constants.NGHTTP2_CANCEL)
+            stm.destroy()
           })
 
-          request_stream.on('close', () => {
-            if (request_stream.rstCode !== http2.constants.NGHTTP2_NO_ERROR) {
-              stm.close(request_stream.rstCode)
+          stm.on('aborted', err => {
+            !stm.destroyed && stm.destroy()
+
+            if (!resolved && !rejected) {
+              rejected = true
+              rj(err)
             }
           })
 
-          request_stream.on('error', err => {
+          stm.on('close', () => {
+            if (stm.rstCode === http2.constants.NGHTTP2_NO_ERROR) {
+              if (!resolved && !rejected) {
+                resolved = true
+                rv()
+              }
+            } else {
+              if (!resolved && !rejected) {
+                rejected = true
+                rj(new Error(`stream close, exit code ${stm.rstCode}`))
+              }
+            }
+          })
+
+          stm.on('response', (headers, flags) => {
+            // ---- 代理传输总时长上限（毫秒）----
+            // 优先级：ctx.box > 代理配置项 > 全局默认
+            // undefined = 未设置，继续向下一级查找；0 = 显式不限制
+            let rt = 0
+            if (c.box && typeof c.box.requestTimeout === 'number') {
+              rt = c.box.requestTimeout
+            } else if (pr && typeof pr.requestTimeout === 'number') {
+              rt = pr.requestTimeout
+            } else if (typeof self.requestTimeout === 'number') {
+              rt = self.requestTimeout
+            }
+
+            if (rt > 0) {
+              let rtTimer = setTimeout(() => {
+                !stm.destroyed && stm.destroy()       // 断开后端 h2 流
+                !c.res.destroyed && c.res.destroy()   // 断开客户端（h2 伪流 / h1 原生 res）
+              }, rt)
+              // h2 流 close 是所有结束路径的终点，仅此处清理即可
+              stm.on('close', () => clearTimeout(rtTimer))
+            }
+
+            // 防御性剥离逐跳头：后端是 h2，协议本身禁止发送这些头，
+            // 此处过滤兜底异常后端（透传给 h2 客户端会被 nghttp2 判协议错误）
+            const extraHopRes = connectionTokens(headers.connection)
+
+            for (let k in headers) {
+              if (k === ':status') continue
+              if (typeof k !== 'string') continue
+
+              if (k[0] === ':' || HOP_BY_HOP_HEADERS[k] || extraHopRes[k]) {
+                delete headers[k]
+              }
+            }
+
+            if (c.res && c.res.writable) {
+              if (c.res.respond) {
+                // HTTP/2：合并配置的响应消息头后一次性发送
+                if (pr.resHeadersCallback) {
+                  let rh = pr.resHeadersCallback(c)
+                  if (rh && typeof rh === 'object') {
+                    for (let k in rh) headers[k] = rh[k]
+                  }
+                } else if (pr.resHeaders) {
+                  for (let k in pr.resHeaders) headers[k] = pr.resHeaders[k]
+                }
+
+                c.res.respond(headers)
+              } else if (c.res.setHeader) {
+                c.status(headers[':status'])
+
+                for (let k in headers) {
+                  if (typeof k !== 'string' || k[0] === ':') continue
+
+                  c.res.setHeader(k, headers[k])
+                }
+
+                // 配置的响应消息头：resHeadersCallback 优先，返回对象则设置；否则设置静态 resHeaders
+                if (pr.resHeadersCallback) {
+                  let rh = pr.resHeadersCallback(c)
+                  if (rh && typeof rh === 'object') {
+                    for (let k in rh) c.res.setHeader(k, rh[k])
+                  }
+                } else if (pr.resHeaders) {
+                  for (let k in pr.resHeaders) c.res.setHeader(k, pr.resHeaders[k])
+                }
+
+                // 🌟 新增：强制将 HTTP/1 的 Headers 发送出去
+                if (c.res.flushHeaders) {
+                  c.res.flushHeaders()
+                }
+              }
+            }
+
+          })
+
+          stm.on('frameError', err => {
             stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
             stm.destroy()
           })
-        } else if (c.res && typeof c.res.on === 'function') {
-          // h1 下游：响应未完成即关闭 = 客户端提前断开 → 终止上游流。
-          // 'close' 覆盖正常/中断全部路径，writableEnded 为判别依据；
-          // 不用已弃用的 'aborted'/req.aborted，也不用 destroyed
-          // （流正常完成后 destroyed 同样为 true，会把正常响应误判为中断）
-          c.res.on('close', () => {
-            if (!c.res.writableEnded && !stm.destroyed) stm.destroy()
+
+          stm.on('error', err => {
+            self.debug && console.error('------ error ------',err)
+            //stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+            stm.destroy(err)
           })
-        }
 
-        stm.setTimeout(pr.timeout, () => {
-          //stm.close(http2.constants.NGHTTP2_CANCEL)
-          stm.destroy()
-        })
+          c.req.on('data', chunk => {
+            // stm 已销毁（后端错误/超时/取消）时丢弃数据，
+            // 避免 write 抛出 ERR_STREAM_DESTROYED 未捕获异常
+            if (stm.destroyed) return
 
-        stm.on('aborted', err => {
-          !stm.destroyed && stm.destroy()
+            // chunked 等无 content-length 的场景：边转发边累计，超限即终止后端流
+            bodyLength += chunk.length
+            if (bodyLength > maxBodyLimit) {
+              if (!resolved && !rejected) {
+                rejected = true
+                !stm.destroyed && stm.destroy()
+                rj(maxBodyError)
+              }
+              return
+            }
 
-          if (!resolved && !rejected) {
-            rejected = true
-            rj(err)
-          }
-        })
+            // 背压控制：h2 流控窗口耗尽时 write 返回 false，
+            // 暂停客户端读取，drain 后恢复，防止数据在流缓冲无限堆积
+            let ok = stm.write(chunk)
+            if (!ok) {
+              c.req.pause()
+              stm.once('drain', () => {
+                c.req.resume()
+              })
+            }
+          })
 
-        stm.on('close', () => {
-          if (stm.rstCode === http2.constants.NGHTTP2_NO_ERROR) {
+          c.req.on('end', () => {
+            // stm 未销毁才 end，否则忽略
+            !stm.destroyed && stm.end()
+          })
+
+          stm.on('data', chunk => {
+            // 客户端已不可写（提前断开）：继续从后端抽数据只会白白占用上游连接
+            // 与流控窗口，直接终止上游流，尽早释放后端资源。
+            // 终止后由 stm 的 'close' 统一 settle，不会造成挂起。
+            if (!c.res || !c.res.writable) {
+              !stm.destroyed && stm.destroy()
+              return
+            }
+
+            // 背压：write 返回 false 时暂停上游，等 drain 后恢复，与请求方向一致。
+            // 监听在此处按需注册且用 once：暂停后不再有 data 事件，
+            // 因此同一时刻至多存在一个待触发的 drain 监听，用完即弃、无需手动摘除。
+            // （不可改为在请求开始时注册一个常驻 once 监听：它会被第一次 drain
+            //   消费掉，此后的背压将 pause 而无人 resume，上游流永久停住。）
+            if (c.res.write(chunk) === false) {
+              stm.pause()
+              c.res.once('drain', () => stm.resume())
+            }
+          })
+
+          stm.on('end', () => {
+            !stm.closed && stm.close()
+
             if (!resolved && !rejected) {
               resolved = true
               rv()
             }
-          } else {
-            if (!resolved && !rejected) {
-              rejected = true
-              rj(new Error(`stream close, exit code ${stm.rstCode}`))
-            }
-          }
-        })
-
-        stm.on('response', (headers, flags) => {
-          // ---- 代理传输总时长上限（毫秒）----
-          // 优先级：ctx.box > 代理配置项 > 全局默认
-          // undefined = 未设置，继续向下一级查找；0 = 显式不限制
-          let rt = 0
-          if (c.box && typeof c.box.requestTimeout === 'number') {
-            rt = c.box.requestTimeout
-          } else if (pr && typeof pr.requestTimeout === 'number') {
-            rt = pr.requestTimeout
-          } else if (typeof self.requestTimeout === 'number') {
-            rt = self.requestTimeout
-          }
-
-          if (rt > 0) {
-            let rtTimer = setTimeout(() => {
-              !stm.destroyed && stm.destroy()       // 断开后端 h2 流
-              !c.res.destroyed && c.res.destroy()   // 断开客户端（h2 伪流 / h1 原生 res）
-            }, rt)
-            // h2 流 close 是所有结束路径的终点，仅此处清理即可
-            stm.on('close', () => clearTimeout(rtTimer))
-          }
-
-          // 防御性剥离逐跳头：后端是 h2，协议本身禁止发送这些头，
-          // 此处过滤兜底异常后端（透传给 h2 客户端会被 nghttp2 判协议错误）
-          const extraHopRes = connectionTokens(headers.connection)
-
-          for (let k in headers) {
-            if (k === ':status') continue
-            if (typeof k !== 'string') continue
-
-            if (k[0] === ':' || HOP_BY_HOP_HEADERS[k] || extraHopRes[k]) {
-              delete headers[k]
-            }
-          }
-
-          if (c.res && c.res.writable) {
-            if (c.res.respond) {
-              // HTTP/2：合并配置的响应消息头后一次性发送
-              if (pr.resHeadersCallback) {
-                let rh = pr.resHeadersCallback(c)
-                if (rh && typeof rh === 'object') {
-                  for (let k in rh) headers[k] = rh[k]
-                }
-              } else if (pr.resHeaders) {
-                for (let k in pr.resHeaders) headers[k] = pr.resHeaders[k]
-              }
-
-              c.res.respond(headers)
-            } else if (c.res.setHeader) {
-              c.status(headers[':status'])
-
-              for (let k in headers) {
-                if (typeof k !== 'string' || k[0] === ':') continue
-
-                c.res.setHeader(k, headers[k])
-              }
-
-              // 配置的响应消息头：resHeadersCallback 优先，返回对象则设置；否则设置静态 resHeaders
-              if (pr.resHeadersCallback) {
-                let rh = pr.resHeadersCallback(c)
-                if (rh && typeof rh === 'object') {
-                  for (let k in rh) c.res.setHeader(k, rh[k])
-                }
-              } else if (pr.resHeaders) {
-                for (let k in pr.resHeaders) c.res.setHeader(k, pr.resHeaders[k])
-              }
-
-              // 🌟 新增：强制将 HTTP/1 的 Headers 发送出去
-              if (c.res.flushHeaders) {
-                c.res.flushHeaders()
-              }
-            }
-          }
-
-        })
-
-        stm.on('frameError', err => {
-          stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
-          stm.destroy()
-        })
-
-        stm.on('error', err => {
-          self.debug && console.error('------ error ------',err)
-          //stm.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
-          stm.destroy(err)
-        })
-
-        c.req.on('data', chunk => {
-          // stm 已销毁（后端错误/超时/取消）时丢弃数据，
-          // 避免 write 抛出 ERR_STREAM_DESTROYED 未捕获异常
-          if (stm.destroyed) return
-
-          // chunked 等无 content-length 的场景：边转发边累计，超限即终止后端流
-          bodyLength += chunk.length
-          if (bodyLength > maxBodyLimit) {
-            if (!resolved && !rejected) {
-              rejected = true
-              !stm.destroyed && stm.destroy()
-              rj(maxBodyError)
-            }
-            return
-          }
-
-          // 背压控制：h2 流控窗口耗尽时 write 返回 false，
-          // 暂停客户端读取，drain 后恢复，防止数据在流缓冲无限堆积
-          let ok = stm.write(chunk)
-          if (!ok) {
-            c.req.pause()
-            stm.once('drain', () => {
-              c.req.resume()
-            })
-          }
-        })
-
-        c.req.on('end', () => {
-          // stm 未销毁才 end，否则忽略
-          !stm.destroyed && stm.end()
-        })
-
-        stm.on('data', chunk => {
-          // 客户端已不可写（提前断开）：继续从后端抽数据只会白白占用上游连接
-          // 与流控窗口，直接终止上游流，尽早释放后端资源。
-          // 终止后由 stm 的 'close' 统一 settle，不会造成挂起。
-          if (!c.res || !c.res.writable) {
-            !stm.destroyed && stm.destroy()
-            return
-          }
-
-          // 背压：write 返回 false 时暂停上游，等 drain 后恢复，与请求方向一致。
-          // 监听在此处按需注册且用 once：暂停后不再有 data 事件，
-          // 因此同一时刻至多存在一个待触发的 drain 监听，用完即弃、无需手动摘除。
-          // （不可改为在请求开始时注册一个常驻 once 监听：它会被第一次 drain
-          //   消费掉，此后的背压将 pause 而无人 resume，上游流永久停住。）
-          if (c.res.write(chunk) === false) {
-            stm.pause()
-            c.res.once('drain', () => stm.resume())
-          }
-        })
-
-        stm.on('end', () => {
-          !stm.closed && stm.close()
-
-          if (!resolved && !rejected) {
-            resolved = true
-            rv()
-          }
-        })
+          })
 
         } catch (err) {
           // executor 内部逃逸的异常：转成 reject，避免外层 await 永久挂起
