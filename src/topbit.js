@@ -1172,8 +1172,6 @@ class Topbit {
 
     this._is_listening = true;
   
-    this.router.argsRouteSort();
-  
     this.rundata.host = (typeof port == 'object' ? (port.host||'') : (typeof port == 'number' ? host : ''));
     this.rundata.port = typeof port == 'object' ? port.port : port;
   
@@ -1183,6 +1181,10 @@ class Topbit {
         c.setHeader('content-type', 'text/html; charset=utf-8').to(_topbit_home_page)
       })
     }
+  
+    //必须在全部路由注册完成之后：argsRouteSort会建立前缀索引与静态段树，
+    //二者都是当前路由表的快照，之后再注册的参数/星号路由不会进入索引，恒查不到。
+    this.router.argsRouteSort();
   
     //如果发现更改了service指向，则让this.httpServ.service重新指向this.service。
     if (this.service !== this.httpServ.service) {
