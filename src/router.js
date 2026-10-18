@@ -194,7 +194,14 @@ class Router {
 
     this.maxDepth = 13
 
-    this.apiTable = {
+    /**
+     * apiTable 是请求方法名到路由表的入口闸门，必须是无原型对象。方法名来自网络
+     * （HTTP/2 的 :method 可以是任意字符串），若继承 Object.prototype，'constructor'
+     * 之类的方法名会取到原型上的函数而不是 undefined，绕过 findRealPath/findPath
+     * 开头的方法校验，并在后面解引用时抛出异常。其余以方法名为键的表只有通过该
+     * 校验的合法方法名才会访问到，不需要同样处理。
+     */
+    this.apiTable = Object.assign(Object.create(null), {
       GET     : {},
       POST    : {},
       PUT     : {},
@@ -203,7 +210,7 @@ class Router {
       HEAD    : {},
       PATCH   : {},
       TRACE   : {}
-    };
+    });
 
     /**
      * 2020.7.31 优化方案：
@@ -289,10 +296,11 @@ class Router {
 
   conflictCheck(p, path, method) {
     let routes = this.apiTable[method];
-    if (routes.length === 0 || !p.isArgs) return true;
+    if (routes === undefined || !p.isArgs) return true;
 
+    //只在注册阶段执行一次，路由数量有限，直接遍历已注册路由即可，不额外维护状态。
     let r
-    for (let k in routes) {
+    for (let k of Object.keys(routes)) {
       r = routes[k]
       if (!r.isArgs || r.routeArr.length !== p.routeArr.length) continue;
 
