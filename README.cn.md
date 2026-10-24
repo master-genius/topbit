@@ -2,7 +2,7 @@
 
 # Topbit
 
-#### [English Documentation](README.en.md)
+#### [English Documentation](README.md)
 
 topbit是基于Node.js的运行于服务端的Web框架，它没有任何第三方依赖，在独特的路由和中间件分组执行机制上进行了极致优化。
 
@@ -25,7 +25,7 @@ topbit是基于Node.js的运行于服务端的Web框架，它没有任何第三�
 
 * 支持通过配置启用HTTP/1.1或是HTTP/2服务。允许同时支持HTTP/2和HTTP/1.1。
 
-* 支持配置启用HTTPS服务（HTTP/2服务必须要开启HTTPS）。
+* 支持配置启用HTTPS服务。纯 HTTP/2 可在明文(h2c)下运行，但浏览器访问HTTP/2必须开启HTTPS（依赖TLS的ALPN协商）；要 `allowHTTP1` 兼容 HTTP/1.1 同样必须开启HTTPS。
 
 * 限制请求数量。限制一段时间内单个IP的最大访问次数。
 
@@ -50,6 +50,16 @@ npm i topbit
 yarn add topbit
 ```
 
+**本文档对应 topbit v3.7.3。** 框架要求 Node.js v14.18 以上（启动时只校验主版本号，低于 14 直接退出），建议用当前 LTS。
+
+**随包附带的命令行工具**（`package.json` 的 `bin` 字段）：
+
+| 命令 | 对应脚本 | 作用 |
+|---|---|---|
+| `tbload` | `bin/loadinfo.sh` | 每 0.35 秒清屏并 `cat` 一次负载文件，用于**查看** `loadInfoFile` 输出的负载信息，用法 `tbload /tmp/topbit-loadinfo.log`。它只是轮询显示，**不是 start/stop 服务管理器**。 |
+| `topbit-new-app` | `bin/newapp.js` | 把内置模板复制成一个新的入口文件，默认文件名 `app.js`，可传第一个参数指定目标文件名；目标已存在时打印「文件已存在」并跳过，不会覆盖。 |
+| `new-route` | `bin/new-ctl.js` | 生成 controller 模板文件，文件头带一份 `context` 的 JSDoc typedef 注释，配合 Loader 的目录约定使用。 |
+
 
 ## 最小示例
 
@@ -63,15 +73,18 @@ const app = new Topbit({
 })
 
 //输出服务信息并运行服务
+//printServInfo(timeout=0, debug=true)：timeout>0 则延迟输出，否则微任务内输出；
+//第一个参数也可以直接传布尔值（会被当作 debug）。只在 debug 为真且 config.debug 为真时才打印。
+//cluster 下 worker 会把路由表通过消息交给 master 统一打印。返回 this，可链式接 run()。
 app.printServInfo().run(1234)
 
 ```
 
-当不填加路由时，topbit默认添加一个路由：
+当不填加路由时，topbit会默认添加一个 `GET /*` 路由（仅GET）：
 
 `/*`
 
-浏览器访问会看到一个非常简单的页面，这仅仅是为了方便最开始的了解和访问文档，它不会对实际开发有任何影响。
+浏览器访问会看到一个非常简单的页面，这仅仅是为了方便最开始的了解和访问文档，它不会对实际开发有任何影响。其他请求方法（POST、PUT等）仍然走 notFound 处理。
 
 
 ## 添加一个路由
@@ -90,7 +103,7 @@ app.get('/', async ctx => {
   ctx.to('success')
 })
 
-//默认监听0.0.0.0，参数和原生接口listen一致。
+//默认监听0.0.0.0，run(port, host) 两个参数，port缺省2368。
 app.run(1234)
 
 ```
@@ -124,7 +137,12 @@ HTTP的起始行给出了请求类型，也被称为：请求方法。目前的�
 GET POST PUT PATCH DELETE OPTIONS  TRACE HEAD
 ```
 
-最常用的是前面6个。对于每个请求类型，router中都有同名但是小写的函数进行路由挂载。为了方便调用，在初始化app后，可以使用app上同名的快捷调用。（框架层面仅支持这些。）
+最常用的是前面6个。对于每个请求类型，router中都有同名但是小写的函数进行路由挂载。为了方便调用，在初始化app后，可以使用app上同名的快捷调用。
+
+除同名快捷调用外，还有两个多方法挂载入口：
+
+- `app.any(path, callback, name)`：把路由同时挂到全部8种请求方法。
+- `app.map(methods, path, callback, name)`：按数组指定方法挂载，示例 `app.map(['GET','HEAD'], '/p', handler)`。
 
 **示例：**
 
@@ -159,7 +177,8 @@ app.put('/p', async c => {
   })
 })
 
-//默认监听0.0.0.0，参数和原生接口listen一致。
+//默认监听 0.0.0.0，run(port, host) 两个参数，port缺省2368。
+//port也可以传对象，但只识别其中的host，端口仍取第一参数。
 app.printServInfo().run(8080)
 
 ```
@@ -167,7 +186,13 @@ app.printServInfo().run(8080)
 
 ## 获取URL参数
 
-- URL中的查询字符串（?后面a=1&b=2形式的参数）解析到c.query中。
+- URL中的查询字符串（?后面a=1&b=2形式的参数）解析到c.query中。`#` 及其后面的片段会被剥离，不参与解析。
+
+- 参数个数受 `maxQuery` 限制（默认 **25**）：超出上限的部分是**静默丢弃**，不报错也不告警，表现为「后面的参数取不到」。参数很多时记得调大此项。
+
+- 默认（`fastParseQuery: false`）同名参数会聚合成数组；设为 `true` 时只保留第一个值，不产生数组。
+
+- `autoDecodeQuery` 默认为 `true`，即对query值调用 `decodeURIComponent`。若参数值本身就含有未转义的 `%`，解码会抛 `URIError`，此时可关掉此项自行处理。
 
 - 表单提交的数据解析到c.body中。
 
@@ -185,12 +210,14 @@ let app = new Topbit({
 
 app.get('/q', async c => {
   //URL中?后面的查询字符串解析到query中。
-  //返回JSON文本，主要区别在于header中content-type为text/json
+  //返回JSON文本，主要区别在于header中content-type为application/json;charset=utf-8
   c.to(c.query)
 })
 
 app.post('/p', async c => {
-  //POST、PUT提交的数据保存到body，如果是表单则会自动解析，否则只是保存原始文本值，
+  //POST、PUT、PATCH、DELETE提交的数据保存到body，
+  //表单和application/json会自动解析为object，text/*解析为字符串，
+  //其余content-type时body是原始的Buffer（即rawBody）。
   //可以使用中间件处理各种数据。
   c.to(c.body)
 })
@@ -201,15 +228,17 @@ app.run(2019)
 
 ## 获取POST提交的数据
 
-提交请求体数据的请求是POST、PUT。在前端页面中，一般是表单提交，或者是异步请求。
+提交请求体数据的请求是POST、PUT、PATCH、DELETE。在前端页面中，一般是表单提交，或者是异步请求。
 
 - 表单提交的数据解析到c.body中。
 
 > 表单对应的content-type为application/x-www-form-urlencoded
 
-> 异步请求的数据很多时候content-type是applicaiton/json
+> 异步请求的数据很多时候content-type是application/json
 
-以上两种类型，对应的c.body都是一个object。
+以上两种类型，对应的c.body都是一个object。`application/json` 解析失败时，框架直接返回400，body为 `bad json data`。表单的键值对个数受 `maxFormKey` 限制（默认100），超出部分静默不解析。
+
+其余 content-type 时，`c.body` 指向原始的 Buffer（即 `c.rawBody`）；只有 `text/*` 会被转成 utf8 字符串。所以不要用 `typeof c.body === 'string'` 来兜住所有非表单的情况。
 
 ``` JavaScript
 'use strict'
@@ -219,7 +248,7 @@ const Topbit = require('topbit')
 let app = new Topbit({debug: true})
 
 app.post('/p', async c => {
-  //POST、PUT提交的数据保存到body，如果是表单则会自动解析为object，
+  //POST、PUT、PATCH、DELETE提交的数据保存到body，如果是表单则会自动解析为object，
   //可以使用中间件处理各种数据。
   c.to(c.body)
 });
@@ -236,7 +265,7 @@ app.run(2019)
 
 **text/\***
 
-若content-type是text/*，就是text/开头的类型，比如text/json，框架层面不做解析处理，仅仅是把上传数据以utf8编码的格式转换成字符串赋值给c.body。后续的处理开发者自行决定。
+若content-type是text/*，就是text/开头的类型，比如text/plain、text/csv，框架层面不做解析处理，仅仅是把上传数据以utf8编码的格式转换成字符串赋值给c.body。后续的处理开发者自行决定。
 
 **multipart/form-data;boundary=xxx**
 
@@ -276,7 +305,6 @@ app.get('/randerr', async c => {
       等效于：
         c.status(404).data = 'not found'
     */
-   //你可以在v22.4.6以上的版本使用链式调用。
     c.status(404).oo('not found')
   }
 })
@@ -287,7 +315,9 @@ app.run(1234)
 
 ## 链式调用
 
-可以对setHeader、status、sendHeader使用链式调用。
+`setHeader`、`status`、`sendHeader`、`write`、`removeHeader` 都返回 `this`，可以链式调用。链式能力由框架自身实现，与 Node.js 版本无关。
+
+`to` 以及别名 `ok`、`oo` 不返回 `this`（返回 undefined），只能作为链的最后一环。
 
 ```javascript
 
@@ -296,11 +326,13 @@ app.get('/', async c => {
   c.setHeader('content-type', 'text/plain; charset=utf-8')
     .setHeader('x-server', 'nodejs server')
     .status(200)
-    .to(`${Date.now()} Math.random()}`)
+    .to(`${Date.now()} ${Math.random()}`)
 
 })
 
 ```
+
+> 消息头的生效时机两个协议不同：HTTP/1.1 的 `setHeader` 直接调用 `res.setHeader`，此时消息头已经写出去；HTTP/2 的 `setHeader` 只是缓存到 `ctx.dataHeaders`，要等 `sendHeader`/`write`/`pipe` 时才 `stream.respond` 发出。此外只有 HTTP/2 的 `setHeader` 支持第一个参数传对象批量设置。
 
 ## 路由参数
 
@@ -309,7 +341,7 @@ app.get('/:name/:id', async c => {
   //使用:表示路由参数，请求参数被解析到c.param
   let username = c.param.name;
   let uid = c.param.id;
-  c.to(`${username} ${id}`)
+  c.to(`${username} ${uid}`)
 })
 
 app.run(8000)
@@ -330,21 +362,30 @@ app.get('/static/*', async c => {
 
 ```
 
+两点需要注意：
+
+- `starPath` **不含前导斜杠**。请求 `/static/images/a.jpg` 命中 `/static/*` 时，`starPath` 是 `images/a.jpg`。
+- `/static/*` 也会匹配 `/static` 本身，此时 `starPath` 是空字符串。
+
 ----
 
 ## 路由查找规则
 
 ----
 
-路由查找过程，主要是对带参数路由和带 * 的路由进行了严格的顺序控制，而不是按照添加顺序进行匹配。
-
-采用之前的版本开发的应用仍然不受影响，不存在兼容性问题。更严格的顺序减少了冲突的可能。
+路由查找过程，主要是对带参数路由和带 * 的路由进行了严格的顺序控制，而不是按照添加顺序进行匹配。更严格的顺序减少了冲突的可能。
 
 路由查找策略：
 
 1. 普通字符串路径。
 2. 带参数路由，参数少的路由会先匹配。
 3. 带 * 的路由，按照最长到最短的模式匹配。
+
+另外三条当前实现的约束：
+
+- 请求路径中多余的斜杠已被容忍，`/x//y` 等价于 `/x/y`（框架固定如此，没有斜杠严格匹配开关）。
+- 路径段数上限为 13（`router.maxDepth`），超出的请求直接走 404。
+- 归一化后同一个字符串只能注册一次，重复注册会抛「冲突，多次添加」；星号与带参数路由在 `run()` 时建立前缀索引和静态段树，因此**路由必须在 `run()` 之前注册完毕**，之后再新增的带参数/星号路由不会进索引、恒查不到。
 
 ```
 示例：
@@ -385,7 +426,7 @@ r.checkRoute('/x/:id/*')
 // { ok: false, message: '/x/:id/* 参数 : 和 * 不能同时出现', route: '/x/:id/*' }
 ```
 
-`ok` 为 `false` 时，`message` 是提示信息，`route` 是归一化后的路由串（即这条路由最终会以什么形式被注册）。
+`ok` 为 `false` 时，`message` 是提示信息，`route` 是归一化后的路由串（即这条路由最终会以什么形式被注册）；入参不是字符串时 `route` 为空字符串。
 
 检测的项目：
 
@@ -402,7 +443,7 @@ r.checkRoute('/x/:id/*')
 
 `addPath()` 内部就是先调用 `checkRoute()`，因此两者的判定结果永远一致。
 
-另外，路由字符串在注册时会被归一化：连续的斜杠合并为一个、缺失的首斜杠补上、末尾的斜杠剥掉。`router.normalizeRoute(path)` 返回归一化后的结果，`//api//v2//` 与 `/api/v2` 是同一条路由。
+另外，路由字符串在注册时会被归一化：先去除首尾空白、连续的斜杠合并为一个、缺失的首斜杠补上、末尾的斜杠剥掉，空字符串归一化为 `/`。`router.normalizeRoute(path)` 返回归一化后的结果，`//api//v2//` 与 `/api/v2` 是同一条路由。
 
 ----
 
@@ -414,15 +455,22 @@ r.checkRoute('/x/:id/*')
 
 - mids是一个数组，每个元素是一个中间件函数或一个数组，数组的第一个元素是中间件，第二个是添加中间件的选项。
 
-- options默认为null，传递一个object为针对所有mids的选项，比如{pre: true}
+- options默认为null，传递一个object为针对所有mids的选项，比如{pre: true}。数组元素若自带选项（`[mid, {method:'POST'}]`），元素级选项会与这里的公共选项合并，**元素级优先**。
+
+- 返回值是一个仅含 `group` 一个属性的对象（`{ group }`），路由方法要用 `group()` 取；不能直接在返回值上调用 `use()`。
 
 **topbit.prototype.group(group_name, callback, prefix=true)**
 
-- group_name 是一个字符串，表示路由分组的名称，如果是合法的路径，也作为路由的前缀。
+- group_name 是一个字符串，表示路由分组的名称。当它符合**前缀字符集**（`/`? + 字母/数字/`_`/`-`/`/`，长度 1~500，见 `src/router.js:21`）时，同时作为路由前缀拼进路径。
 
-- callback 回调函数，回调函数接收的参数仍然可以调用middleware和group，同时可以调用get、post等方法添加路由。
+- callback 回调函数，回调函数接收的参数仍然可以调用middleware和group，同时可以调用get、post等方法添加路由。若第二个参数直接传布尔值，它会被当作 `prefix`，此时不执行回调、只返回可用于挂载的 route 对象。
 
-- prefix 布尔值，默认为true，用于控制group_name是否添加为路由的前缀，不过只有在group_name为合法的路由字符串才会作为前缀。
+- prefix 布尔值，默认为true，用于控制group_name是否添加为路由的前缀。只有 group_name 符合上述前缀字符集时才会作为前缀。
+
+> **分组名不会成为前缀时，框架不报错也不告警**，路由会静默注册到不带前缀的路径上。
+> 注意前缀字符集**不包含 `.` `@` `:`**，尽管这些字符在完整路由里是合法的：`app.group('v1.0', ...)`、`app.group('v1:2', ...)` 注册出来的路径是 `/u` 而不是 `/v1.0/u`。版本号式分组请写成 `v1_0`，或直接在路由字符串里带上前缀。
+>
+> `@` 是分组引用的标记，不是名字的一部分：`app.use(mid, '@web')` 会剥掉 `@` 挂到分组 `web`；而 `app.group('@web', ...)` 的分组名就是 `@web`，两者接不上，中间件会静默不生效。同理 `app.use(mid, {group: '@web'})` 这种对象写法不会剥 `@`（键就是 `@web`）。**分组名一律不要带 `@`，只有字符串引用时才加 `@`。**
 
 
 ```javascript
@@ -524,7 +572,8 @@ app.middleware([
         c.to(c.param)
       })
 
-      //子分组 /sub启用中间件sub_mid_test，同时，子分组会启用上一层的所有中间件。
+      //子分组 /sub启用中间件sub_mid_test。经 middleware() 登记的中间件会被子分组继承，
+      //但注意：用 use/pre 直接挂到父分组的中间件不会自动下发到子分组（详见下方说明）。
       route.middleware([sub_mid_test])
         .group('/sub', sub => {
             sub.get('/:key', async c => {
@@ -588,7 +637,7 @@ route.get('/:name', async c => {
   c.to(c.param)
 })
 
-//子分组 /sub启用中间件sub_mid_test，同时，子分组会启用上一层的所有中间件。
+//子分组 /sub启用中间件sub_mid_test；经 middleware() 登记的中间件会被子分组继承，
 route.middleware([sub_mid_test])
   .group('/sub', sub => {
       sub.get('/:key', async c => {
@@ -675,6 +724,8 @@ app.run(1234)
 
 c.getFile就是通过名称索引，默认索引值是0，如果是一个小于0的数字，则会获取整个文件数组，没有返回null。
 
+> 文件对象**没有 `data` 字段**：`start`/`end`/`length` 只是该文件在 `c.rawBody` 中的字节区间，内容始终留在 `rawBody` 上。要取字节用 `c.rawBody.slice(f.start, f.end)`；想让文件对象具备 `.toFile()` 写盘能力，必须挂载 `ToFile` 扩展（见扩展章节），基础上下文不提供。把 `f.data` 当成内容来判空，会让每个上传都被误判为非法。
+
 
 ## body最大数据量限制
 
@@ -684,7 +735,7 @@ c.getFile就是通过名称索引，默认索引值是0，如果是一个小于0
 const Topbit = require('topbit')
 
 const app = new Topbit({
-  //允许POST或PUT请求提交的数据量最大值为将近20M。
+  //允许POST、PUT、PATCH、DELETE提交的数据量最大值为将近20M。
   //单位为字节。
   maxBody: 20000000
 })
@@ -694,6 +745,10 @@ const app = new Topbit({
 app.run(1234)
 
 ```
+
+`maxBody` 是上传体积真正的闸门：框架在 body 读完之前就按 `content-length` 判定并拒绝，不会先把整个请求体收进内存再检查。
+
+另一个相关选项是 `maxFiles`（默认 12），它限制**一次请求解析出的文件部件数量**，超出部分**静默不处理**——不会报错，也不会告诉你少收了几个文件。所以接收多文件上传时，要自己比对 `Object.keys(c.files).length`。
 
 
 ## 中间件
@@ -857,7 +912,7 @@ app.run(1234)
 
 ## 同时支持HTTP/2和HTTP/1.1(兼容模式)
 
-兼容模式是利用ALPN协议，需要使用HTTPS才可以，所以必须要配置证书和密钥。
+兼容模式是利用ALPN协议在同一端口上协商 h2 与 http/1.1，**ALPN 只存在于 TLS 握手中，所以兼容模式必须开启 HTTPS**（与「纯 HTTP/2 可走 h2c 明文」不冲突：h2c 没有 ALPN，无法做这种同端口协议协商）。因此必须配置证书和密钥。
 
 ```javascript
 'use strict'
@@ -885,7 +940,7 @@ app.run(1234)
 ``` JavaScript
   {
     //此配置表示POST/PUT提交表单的最大字节数，也是上传文件的最大限制。
-    maxBody   : 8000000,
+    maxBody   : 50000000,
 
     //最大解析的文件数量
     maxFiles      : 12,
@@ -908,7 +963,7 @@ app.run(1234)
     errorLogFile : '',
 
     //日志文件最大条数
-    logMaxLines: 50000,
+    logMaxLines: 20000,
 
     //最大历史日志文件数量
     logHistory: 50,
@@ -929,12 +984,12 @@ app.run(1234)
 
     //服务器选项都写在server中，在初始化http服务时会传递，参考http2.createSecureServer、tls.createServer
     server : {
-      handshakeTimeout: 8192, //TLS握手连接（HANDSHAKE）超时
+      handshakeTimeout: 9000, //TLS握手连接（HANDSHAKE）超时
       //sessionTimeout: 350,
     },
 
     //设置服务器超时，毫秒单位，在具体的请求中，可以再设置请求的超时。
-    timeout   : 15000,
+    timeout   : 20000,
 
     debug     : false,
 
@@ -942,13 +997,14 @@ app.run(1234)
     useLimit: false,
 
     //最大连接数，0表示不限制
-    maxConn : 1024,
+    maxConn : 2560,
 
-    //单个IP单位时间内的最大连接数，0表示不限制
+    //单个IP在单位时间(unitTime)内可建立的连接数，0表示不限制。
+    //超限时框架直接 destroy 该连接（src/connfilter.js:77-79），不返回任何响应。
     maxIPRequest: 0,
 
-    //针对IP的限流单位时间，1表示1秒，默认为60秒，0.1 ~ 86400
-    unitTime : 60,
+    //针对IP的限流单位时间，1表示1秒，默认为30秒，0.1 ~ 86400
+    unitTime : 30,
     
     //展示负载信息，需要通过daemon接口开启cluster集群模式
     loadMonitor : true,
@@ -961,19 +1017,19 @@ app.run(1234)
     loadInfoFile : '',
 
     //404要返回的数据
-    notFound: 'Not Found',
-    
-    //400要返回的数据
-    badRequest : 'Bad Request',
+    notFound: 'not found',
 
-    //控制子进程最大内存使用量的百分比参数，范围从-0.42 ～ 0.36。基础数值是0.52，所以默认值百分比为80%。
+    //400要返回的数据
+    badRequest : 'bad request',
+
+    //控制子进程最大内存使用量的百分比参数，范围从-0.45 ～ 0.45。基础数值是0.52，所以默认值百分比为80%。
     memFactor: 0.28,
 
-    //url最大长度
-    maxUrlLength: 2048,
+    //url最大长度，包括path和querystring，可设置范围 1 ~ 4096
+    maxUrlLength: 1152,
 
-    //子进程汇报资源信息的定时器毫秒数。
-    monitorTimeSlice: 640,
+    //子进程汇报资源信息的定时器毫秒数，可设置范围 5 ~ 10000。
+    monitorTimeSlice: 500,
 
     //在globalLog为true时，全局日志是否记录真实的IP地址，主要用在反向代理模式下。
     realIP: false,
@@ -981,8 +1037,10 @@ app.run(1234)
     //允许的最大querystring参数个数。
     maxQuery: 25,
 
-    //是否启用strong模式，启用后会使用process处理rejectionHandled 和 uncaughtException事件，
+    //是否启用strong模式，启用后会使用process处理unhandledRejection 和 uncaughtException事件，
     //并捕获一些错误：TypeError,ReferenceError,RangeError,AssertionError,URIError,Error。
+    //strong 可以是 true，也可以是 object（{quiet, errorHandle, catchErrors}）。
+    //注意：不在 catchErrors 列表里的错误仍会 console.error 并 process.exit(1)。
     strong: false,
 
     //快速解析querystring，多个同名的值会仅设置第一个，不会解析成数组。
@@ -1011,12 +1069,35 @@ app.run(1234)
     maxLoadRate: 0.75,
 
     //http2协议的http2Stream超时，若不设置，-1表示和timeout一致。
+    //注意：-1 只是入参约定，构造时会被归一化为 timeout 的实际值，
+    //      所以读取 app.config.streamTimeout 拿到的不是 -1。
     streamTimeout: -1,
 
     //请求超时时间，此超时时间是请求总的时间，主要是为了应对恶意请求。
     //比如，发出大量请求，每个请求每秒发送一个字节，空闲超时不会起作用，则可以长期占有服务器资源。
     //在大量请求时，正常用户无法访问，此攻击属于DDOS。
-    requestTimeout: 100000,
+    requestTimeout: 65000,
+
+    //是否自动解析body数据，为false时框架不挂载内置的bodyparser中间件，body需要自行处理。
+    parseBody: true,
+
+    //在multipart格式中，允许的最大表单键值个数，超出部分静默不解析。
+    maxFormKey: 100,
+
+    //IP限流缓存的最大条目数，最小值1024。
+    maxIPCache: 100000,
+
+    //CPU数量兜底值，仅在 os.cpus() 返回0时使用，默认0表示不设兜底。
+    cpus: 0,
+
+    //IP黑名单，可以是Set类型，也可以是 (ip) => boolean 函数。
+    deny: null,
+
+    //IP白名单，可以是Set类型，也可以是 (ip) => boolean 函数。
+    allow: null,
+
+    //是否开启守护进程（cluster）模式，也可通过 app.daemon() 启动。
+    daemon: false,
 
   };
   // 对于HTTP状态码，在这里仅需要这两个，其他很多是可以不必完整支持，并且你可以在实现应用时自行处理。
@@ -1024,6 +1105,16 @@ app.run(1234)
   // 而在这之前，框架还在为开始执行洋葱模型做准备，不过此过程非常快。
 
 ```
+
+**配置生效规则**
+
+以上选项并非都能随意取值，框架对每个选项做了类型与范围校验（`src/optionsCheck.js`）：
+
+- 校验不通过时**只会延迟输出一条黄色告警，并不会写入 config**，实际表现是「静默保持默认值」，既不抛错也不中断启动。配置改了不生效时，先看控制台有没有这条告警。
+- 未识别的选项名同样只输出一条「未知选项」告警后被忽略。
+- 取值白名单：`logType` 只能是 `'stdio'`、`'file'` 或 `''`；`loadInfoType` 只能是 `null`、`'null'`、`'text'`、`'obj'`、`'orgobj'`。
+- 数值范围：`memFactor` -0.45 ~ 0.45；`maxUrlLength` 1 ~ 4096；`monitorTimeSlice` 5 ~ 10000；`maxLoadRate` 0.15 ~ 0.98；`maxIPCache` ≥ 1024；`logMaxLines` 1 ~ 5000000；`unitTime` 0.1 ~ 86400（单位为秒）。
+- `key` 和 `cert` 必须**同时**提供才会生效并自动把 `https` 置为 true，只给其中一个会被忽略。`server.SNICallback` 为函数时也会自动置 `https` 为 true。
 
 ## 请求上下文
 
@@ -1044,27 +1135,31 @@ app.run(1234)
 | query | url传递的参数。 |
 | param | 路由参数。 |
 | files | 上传文件保存的信息。 |
-| body | body请求体的数据，具体格式需要看content-type，一般为字符串或者对象，也可能是buffer。 |
-| port | 客户端请求的端口号。 |
+| body | body请求体的数据，具体格式需要看content-type：`application/x-www-form-urlencoded` 和 `application/json` 解析为object，`text/*` 为字符串，其余content-type是原始Buffer（即rawBody）。 |
+| port | 客户端的源端口，也就是 `socket.remotePort`，不是服务监听的端口。 |
 | ip | 客户端请求的IP地址，是套接字的地址，如果使用了代理服务器，需要检测x-real-ip或是x-forwarded-for消息头获取真正的IP。 |
 | headers | 指向request.headers。 |
-| isUpload() | 是否为上传文件请求，此时就是检测消息头content-type是否为multipart/form-data格式。 |
+| isUpload | 布尔属性（不是函数），是否为上传文件请求，此时就是检测消息头content-type是否为multipart/form-data格式。 |
 | name | 路由名称，默认为空字符串。 |
 | group | 路由分组，默认为空字符串。 |
 | res | HTTP/1.1协议，指向response，HTTP/2 指向stream。 |
 | req | HTTP/1.1 就是http模块request事件的参数IncomingMessage对象，HTTP/2 指向stream对象。 |
 | box | 默认为空对象，可以添加任何属性值，用来动态传递给下一层组件需要使用的信息。 |
 | service | 用于依赖注入的对象，指向app.service。 |
-| data | 保存最后要返回到客户端的数据，给data赋值即可，或者直接使用ctx.to函数。在v24.x版本以前，是ctx\.res\.body。 |
-| ext | 提供了一些助手函数，具体参考wiki。 |
-| to(data) | 函数，用来设置ctx.data的数据。 |
-| write(data) | 直接写入数据到客户端。 |
-| moveFile(file:object, target_filepath:string) | 函数，用来移动上传的文件到指定路径。 |
-| status() | 函数，设置状态码。 |
-| setHeader(k, v) | 函数，设置消息头。 |
-| removeHeader(k) | 函数，移除等待发送的消息头。 |
-| getFile(name) | 函数，获取上传的文件信息，其实就是读取files属性的信息。 |
-| sendHeader() | 函数，用于http2发送消息头，setHeader只是缓存了设置的消息头。对于http/1.1来说，为了保持代码一致，只是一个空函数。 |
+| data | 保存最后要返回到客户端的数据，给data赋值即可，或者直接使用ctx.to函数。 |
+| dataEncoding | data为字符串时写出使用的编码，默认 `utf8`。 |
+| rawBody | 请求体的原始Buffer，body未解析或需要按字节处理时使用。 |
+| bodyLength | 已接收的body字节数。 |
+| requestCall | 本次命中的路由处理函数引用。 |
+| ext | 助手函数集合，包含：`aesDecrypt aesEncrypt bigId ctype delay extName extnameType hmacsha1 makeId makeName md5 nrand pipe randstring readFile readb serialId sha1 sha256 sha512 sm3 timestr uuid writeFile`。 |
+| to(data) | 函数，用来设置ctx.data的数据。返回 undefined，因此不能作为链式调用的中间环节；别名 `ok`、`oo` 指向同一个函数。 |
+| write(data) | 直接写入数据到客户端。HTTP/2 下若消息头尚未发送会先触发 respond。 |
+| moveFile(file:object, target_filepath:string) | 函数，把上传文件写出到指定路径。实现是从 `ctx.rawBody` 按 `file.start`/`file.length` 切片写入新文件（`fs.open(target,'w+',0o644)`），返回写入的字节数；不是 rename，目标目录不存在会抛 ENOENT。 |
+| status() | 传数字时设置状态码并返回this；**不传参数时返回当前状态码**（HTTP/2 从 `:status` 读取，缺省返回200）。 |
+| setHeader(k, v) | 函数，设置消息头。HTTP/1.1 直接调用 `res.setHeader`，调用时消息头即已写出；HTTP/2 只缓存到 `ctx.dataHeaders`，要等 `sendHeader`/`write`/`pipe` 时才发出。只有 HTTP/2 支持第一个参数传对象做批量设置。 |
+| removeHeader(k) | 函数，移除等待发送的消息头。HTTP/1.1 在响应头已发出之后调用会抛错。 |
+| getFile(name, ind = 0) | 函数，获取上传的文件信息，其实就是读取files属性的信息。`ind` 默认0取第一个；传负数返回该字段的整个数组；字段不存在或索引越界返回 null。 |
+| sendHeader() | 函数，用于发送消息头。HTTP/2 调用 `stream.respond` 发出缓存的头；HTTP/1.1 **并不是空函数**，它会在头尚未发送时执行 `res.writeHead(res.statusCode)`。两者都返回 this。 |
 | user | 给用户登录提供一个标准属性，默认之为null。 |
 | json(data) | 函数，设置返回数据，并标记类型为json。 |
 | text(data) | 函数，设置返回数据，并标记类型为text。 |
@@ -1073,8 +1168,12 @@ app.run(1234)
 | pipeJson(filepath) | 以json类型流式响应文件数据。 |
 | pipeText(filepath) | 以text类型流式响应文件数据。 |
 | pipeHtml(filepath) | 以html类型流式响应文件数据。 |
+| dataHeaders | **仅 HTTP/2 上下文存在**。`setHeader` 缓存的消息头对象，`sendHeader` 时整体 respond 发出。 |
+| stream | **仅 HTTP/2 上下文存在**。指向当前 http2stream。 |
 
 注意：to函数只是设置ctx.data属性的值，在最后才会返回数据。和直接进行ctx.data赋值没有区别，只是因为函数调用如果出错会更快发现问题，而设置属性值写错了就是添加了一个新的属性，不会报错但是请求不会返回正确的数据。
+
+> 请求上下文按协议有两套实现：HTTP/1.1 用 context1，HTTP/2（未开 `allowHTTP1`）用 context2；开启 `allowHTTP1` 时同一实例会按每个请求的协议分别使用。跨协议复用的处理代码不要依赖只存在于其中一个上下文的成员，例如对象形 `setHeader`、`dataHeaders`、`stream`。
 
 ## 依赖注入
 
@@ -1111,9 +1210,13 @@ app.run(1234)
 
 ```
 
+配套还有 `app.getService(key)` 读取、`app.clearService()` 清空。`c.service` 指向的就是 `app.service` 这个对象本身；整体替换 `app.service = {...}` 只在 `run()` 之前有效（`run()` 内部会把新指向同步给服务层），运行期间请改用逐项赋值，否则已建立的引用关系不会更新。
+
 ## 扩展请求上下文
 
-如果需要给请求上下文的对象添加扩展支持，可以通过app实例的httpServ.context实现。此属性是请求上下文的构造函数。
+如果需要给请求上下文的对象添加扩展支持，可以通过app实例的 `httpServ.Context` 实现。此属性是请求上下文的构造函数（注意是**大写的 `Context`**，`http1.js:27`、`http2.js:27` 都是 `this.Context = Context`；写成小写 `context` 取到 undefined，`.prototype` 直接抛 TypeError）。
+
+HTTP/1.1 与 HTTP/2 用的是两个不同的上下文构造函数，需要分别扩展，或者按当前协议判断后再挂。
 
 **示例：**
 
@@ -1127,7 +1230,7 @@ const app = new Topbit({
 })
 
 //this即表示请求上下文
-app.httpServ.context.prototype.testCtx = function () {
+app.httpServ.Context.prototype.testCtx = function () {
     console.log(this.method, this.path)
 }
 
@@ -1142,7 +1245,7 @@ app.run(1234)
 
 ## app.isMaster和app.isWorker
 
-Node.js在v16.x版本开始，cluster模块推荐使用isPrimary代替isMaster，不过isMaster仍然是可用的，在topbit初始化app实例之后，app上有两个getter属性：isMaster和isWorker。作用和cluster上的属性一致，其目的在于：
+Node.js的cluster模块推荐用 `isPrimary` 代替 `isMaster`（`isMaster` 仍然可用）。在topbit初始化app实例之后，app上有三个getter属性：`isMaster`、`isPrimary`、`isWorker`。作用和cluster上的属性一致，其目的在于：
 
 - 在代码中不必再次编写const cluster = require('cluster')。
 
@@ -1155,7 +1258,7 @@ run接口的参数为：port、host。host默认为0.0.0.0。还可以是sockPat
 
 daemon的前两个参数和run一致，支持第三个参数是一个数字，表示要使用多少个子进程处理请求。默认为0，这时候会自动根据CPU核心数量创建子进程。之后，会保持子进程数量的稳定，在子进程意外终止后会创建新的子进程补充。
 
-**cluster模式，最多子进程数量不会超过CPU核心数量的2倍。**
+**关于子进程数量的上限：传入的数值如果超过 CPU 核心数量的 2 倍，并不会被截断到 2 倍，而是被整个丢弃、回落到默认策略**（`topbit.js:1273-1285`）。默认策略是：取 CPU 核心数，若核心数大于 2 则再减 1。传 `0` 同样走默认策略。
 
 示例：
 
@@ -1177,7 +1280,7 @@ app.daemon(1234, 'localhost', 3)
 
 ## 日志
 
-框架本身提供了全局日志功能，当使用cluster模式时（使用daemon接口运行服务），使用初始化选项globoalLog可以开启全局日志，并且可以指定日志文件，在单进程模式，会把日志输出到终端，此时利用输出重定向和错误输出重定向仍然可以把日志保存到文件。
+框架本身提供了全局日志功能，当使用cluster模式时（使用daemon接口运行服务），使用初始化选项`globalLog`可以开启全局日志，并且可以指定日志文件，在单进程模式，会把日志输出到终端，此时利用输出重定向和错误输出重定向仍然可以把日志保存到文件。
 
 **注意：只有使用daemon运行，采用cluster模式，才可以把日志保存到文件，run运行后的单进程仅仅是输出到屏幕，可以利用IO重定向保存到文件。**
 
@@ -1196,8 +1299,8 @@ const app = new Topbit({
   //全局日志开启
   globalLog: true,
 
-  //表示输出到文件，默认为stdio表示输出到终端。
-  logType: 'file'
+  //表示输出到文件，默认为stdio表示输出到终端。可选 stdio | file
+  logType: 'file',
 
   //返回状态码为2xx或者3xx
   logFile : '/tmp/topbit.log',
@@ -1236,6 +1339,8 @@ app.daemon(1234, 3)
 
 这要求worker进程发送的消息必须是一个对象，其中的type属性是必需的，表示消息事件的名称。其他字段的数据皆可以自定义。
 
+`app.setMsgEvent(evt, callback, mode='always')`：第三个参数可为 `always`（默认，可反复触发）或 `once`（只触发一次后移除）。回调参数为 `(worker, msg, handle)`。配套还有 `app.getMsgEvent(evt)` 查询、`app.removeMsgEvent(evt)` 移除；这两个注册入口在 worker 进程内直接 return，只有 master 生效。
+
 使用方式如下：
 
 ``` JavaScript
@@ -1259,12 +1364,12 @@ if (cluster.isMaster) {
     console.log(msg)
   })
 } else {
-  //接收worker.to发送的消息
+  //接收worker.send发送的消息
   process.on('message', msg => {
     console.log(msg)
   })
 
-  setIneterval(() => {
+  setInterval(() => {
     process.send({
       type : 'test-msg',
       pid : process.pid,
@@ -1276,7 +1381,9 @@ if (cluster.isMaster) {
 
 ```
 
-比较麻烦的地方在于，worker进程发送消息比较复杂，在22.4.0版本开始，提供了一个send方法用于快速发送消息。只有在worker进程中才会发送给master进程，所以不必额外进行worker进程检测。
+比较麻烦的地方在于，worker进程发送消息比较复杂，所以提供了一个send方法用于快速发送消息。只有在worker进程中才会发送给master进程，所以不必额外进行worker进程检测。
+
+`app.send(evtname, msg, handle)`：`msg` 为字符串或数字时会被包成 `{msg: 值}`，然后写入 `msg.type = evtname`。注意 **`msg` 为空值时静默 return**（`''`、`0`、`false`、`undefined` 都不发），要传空消息得用对象形式。
 
 ## app.send 和 app.workerMsg
 
@@ -1347,8 +1454,6 @@ app.daemon(1234, 2)
 ```
 
 当负载过高时，会自动创建子进程，并且在空闲一段时间后，会自动终止连接数量为0的子进程，恢复到基本的数值。
-
-**此功能在v21.9.6+版本可用。但是请尽可能使用最新版本，此功能在后续版本经历几次升级改进，提高了稳定性和性能，保证在严苛的业务逻辑上仍然能够提供稳定的服务支持。**
 
 ----
 
@@ -1435,7 +1540,15 @@ const app = new Topbit({
 //这种情况下，你需要自己设定相关事件的监听处理。
 
 let http_server = http.createServer(app.httpServ.onRequest())
-let https_server = https.createServer(app.httpServ.onRequest())
+
+// https 服务必须自己提供证书，否则 TLS 握手无法完成
+const fs = require('node:fs')
+let https_server = https.createServer({
+    key: fs.readFileSync('./cert/localhost-privkey.pem'),
+    cert: fs.readFileSync('./cert/localhost-cert.pem')
+  },
+  app.httpServ.onRequest()
+)
 
 http_server.listen(2025)
 https_server.listen(2026)
@@ -1446,7 +1559,7 @@ https_server.listen(2026)
 
 ## 请求限流
 
-框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用扩展http2limit模块。
+框架层面提供的限流是基于IP地址的计算和过滤，避免同一个IP地址密集的发送请求。若使用HTTP/2协议，则需要配合使用扩展 `StreamLimit`（源文件是 `http2limit.js`，但注册进 `Topbit.extensions` 的键名是 **`StreamLimit`**，两者不同名）。
 
 ```javascript
 'use strict';
@@ -1498,7 +1611,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 ## 其他
 
-- topbit在运行后，会有一个最后包装的中间件做最终的处理，所以设置c.data的值就会返回数据，默认会检测一些简单的文本类型并自动设定content-type（text/plain,text/html,application/json）。注意这是在你没有设置content-type的情况下进行。
+- topbit在运行后，会有一个最后包装的中间件做最终的处理，所以设置c.data的值就会返回数据。默认会按数据形态推断 content-type：对象为 `application/json;charset=utf-8`；字符串若以 `{`/`[` 开头按 `application/json;charset=utf-8`，以 `<!` 开头按 `text/html;charset=utf-8`，其余为 `text/plain;charset=utf-8`（注意只认 `<!` 开头，单独的 `<` 不判为 html）。两个前提：**你没有自己设置过 content-type**，且响应头尚未发出，否则一律不干预。
 
 - 默认会限制url的最大长度，也会根据硬件情况设定一个最大内存使用率。
 
@@ -1506,7 +1619,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 - 它很快，并且我们一直在都在关注优化。
 
-- 提供了一个sched函数用来快速设置cluster模式的调度方式，支持参数为'rr'或'none'，本质就是设置cluster.schedulingPolicy的值。
+- 提供了一个sched函数用来快速设置cluster模式的调度方式，支持参数为'rr'或'none'，本质就是设置cluster.schedulingPolicy的值。传入其它值（包括不传）时**不返回 this，而是返回当前的 schedulingPolicy**，因此不能无条件接在链式调用后面。
 
 
 框架在初始化会自动检测内存大小并设定相关上限，你可以在初始化后，通过更改secure中的属性来更改限制，这需要你使用daemon接口，也就是使用master管理子进程的模式。
@@ -1567,7 +1680,7 @@ app.daemon(8008, 2)
 
 process.chdir(__dirname)
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 
 //通过解构赋值导入扩展
 const {Cors, ToFile} = Topbit.extensions
@@ -1609,8 +1722,25 @@ app.run(1235)
 | SNI            | HTTPS 多域名支持。                                                    |
 | ParamCheck     | 请求参数检测，支持 `param`、`query`、`body` 的检测。                   |
 | JWT            | JWT 协议的 token 验证，推荐使用 Topbit.Token，比 JWT 强太多。          |
-| Cookie         | 解析前端请求的消息头 cookie。                                         |
-| Session        | Session 会话，使用的是本地文件机制。                                   |
+| Cookie         | 解析前端请求的消息头 cookie，结果在 `ctx.box.cookie`。                 |
+| Session        | Session 会话，使用本地文件机制，依赖 Cookie；仅用于测试和教学。          |
+| RealIP         | 从 `x-real-ip` / `x-forwarded-for` 还原真实客户端IP，反向代理场景刚需。 |
+| Referer        | referer 白名单校验（防盗链），未通过按配置状态码返回。                  |
+| Timing         | 统计各请求方法各路由的耗时，可输出到文件。                              |
+| MixLogger      | 聚合或接管框架日志，cluster 下汇总各 worker 的日志。                    |
+| SetFinal       | 自定义最终的响应处理函数，可按协议分别设置。                            |
+| StreamLimit    | HTTP/2 单连接密集流限流（源文件名是 `http2limit.js`）。                 |
+| ProxyNoAgent   | 不使用 Agent 的 HTTP/1.1 反向代理实现，参数与 Proxy 基本一致。           |
+| Http2Pool      | HTTP/2 上游连接池，由 Http2Proxy 内部使用，**不是中间件，不要直接注册**。 |
+
+> 这张表的键来自 `Topbit.extensions`，取的是**导出项自身的 `.name`，与文件名无关** —— 例如 `http2limit.js` 对应的键是 `StreamLimit`。以 `_` 或 `!` 开头的文件会被跳过（`src/_loadExtends.js:17-20`）。
+
+**类式扩展的注册契约**（自建扩展必读）：`app.use/pre/add` 接收实例时，只认两种形态，否则直接抛 `callback and middleware function must use async`（`src/midcore.js:80-96`）：
+
+1. 实例有 `mid()` 方法 —— 框架调用它，取**返回值**作为中间件（返回值必须是 async 函数）；
+2. 实例有 `middleware` 方法 —— 必须是 `async` 声明（构造器名为 `AsyncFunction`），框架自动 `bind` 实例。
+
+普通对象、同步函数、箭头函数都不满足，注册时即抛错。另外注意：只有 Proxy / ProxyNoAgent / Http2Proxy 三个扩展会对未知构造选项打「未知选项」告警，其余扩展是各自的 switch 白名单，拼错的 key 静默忽略。
 
 ---
 
@@ -1633,13 +1763,17 @@ let cr = new Cors({
         'https://www.a.com',
     ],
 
-    // 默认只有 content-type
+    // 默认包含 authorization 和 content-type
     allowHeaders : 'authorization,content-type',
 
     // OPTIONS 请求缓存 60 秒，此期间浏览器请求会先去读取缓存。
     optionsCache: 60,
 
-    // 默认为 '*'，可以设置允许的请求方法。
+    // 允许的请求方法，默认为 '*'。设置方法请用 methods（对应响应头 access-control-allow-methods）
+    // methods : ['GET','POST','PUT'],
+
+    // requestHeaders 对应的是响应头 access-control-request-headers，默认为 '*'，
+    // 它**不是**用来设置允许方法的选项，别和 methods 混用。
     // requestHeaders : '*'
 
     // 默认为 ''，表示哪些消息头可以暴露给请求端，多个消息头使用 , 分隔。
@@ -1656,15 +1790,17 @@ app.options('/*', async c => {})
 **高级配置（Referer检测与分组）：**
 
 ```javascript
-let cr = new cors({
+let cr = new Cors({
   // 不允许 referer 为空
   allowEmptyReferer: false,
 
   // 允许 referer 为空的路由分组，
   // 分组名称是自定义的，参考框架的路由分组功能。
+  // 注意：这里填的是**分组名本身，不带 @** —— 框架内部登记的 ctx.group 已剥掉引用时的 @，
+  // 写成 '@webapp' 永远不会命中。
   // 此功能主要用于在 API 开发中还要兼顾页面的服务上。
   emptyRefererGroup: [
-    '@webapp', '@pages'
+    'webapp', 'pages'
   ],
 
   allow: [
@@ -1732,14 +1868,18 @@ let st = new Resource({
     // 设置消息头 cache-control 的值，默认为 null
     cacheControl: 'max-age=3600',
     
-    // 最大总缓存大小（默认 120MB）
-    maxCacheSize: 120_000_000,
+    // 最大总缓存大小（默认 128MB）
+    maxCacheSize: 128_000_000,
 
     // 失败限制次数与缓存释放概率
     failedLimit: 50,
-    prob: 6
+    prob: 6,
+
+    // 周期校验缓存文件的间隔（毫秒），默认 600000。到期后重新 stat 比对 size+mtime
+    // checkInterval: 600000,
 })
 
+// init 的第二个参数可指定分组，省略时用上例 routeGroup 的值
 st.init(app)
 
 // 自动添加到 _static 分组。
@@ -1750,8 +1890,11 @@ app.get('/favicon.ico', async c => {}, {group: '_static'})
 **接口说明：**
 *   `addType(obj)`: 添加扩展名到 content-type 的映射关系。
 *   `clearCache()`: 清理缓存。
-*   `removeCache(path)` / `removeNameCache(name)`: 按路径或名称片段清理缓存条目，并同步扣减已用量。
+*   `removeCache(path)` / `removeNameCache(name)` / `removeGroupCache(filepre)`: 按路径、名称片段或分组前缀清理缓存条目，并同步扣减已用量。
 *   `canCache()`: 当前是否还能接纳新的缓存条目。
+*   `init(app, group)`: 第二个参数可指定该实例服务的分组，省略时取构造选项 `routeGroup`。
+
+> Resource 的构造选项是自身的 switch 白名单，**没有未知选项告警**（不同于 Proxy 系列）——拼错的 key 会被静默忽略，表现为「配置没生效」。
 
 **内容编码协商**
 
@@ -1783,8 +1926,11 @@ const {ToFile} = Topbit.extensions
 app.use( new ToFile() )
 
 app.post('/upload', async c => {
-    // 获取上传的文件对象
+    // 获取上传的文件对象（同名多文件时默认取第一个）
     let f = c.getFile('image')
+
+    // 取该上传名的全部文件：第二个参数传负数
+    // let all = c.getFile('image', -1)
 
     if (!f) {
         return c.status(400).oo('image file not found')
@@ -1801,6 +1947,8 @@ app.post('/upload', async c => {
 app.run(1234)
 
 ```
+
+> ToFile 只在 `multipart/form-data` 请求（`c.isUpload` 为真）上替换 `getFile`，也只有这时文件对象才带 `toFile` 方法；普通 JSON/表单请求拿到的仍是原始对象。并且必须**在注册路由之前**用它，否则路由里取到的 `getFile` 不是被增强过的版本。
 
 ---
 
@@ -1860,12 +2008,15 @@ let s = new SSE({
   mode: 'yield' // 开启生成器模式
 })
 
-s.handle = (ctx) => {
+s.handle = async (ctx) => {
     ctx.sendmsg({event: 'eat', data: '饭'})
     // 使用 await ctx.sse.moment(ms) 进行延迟
     await ctx.sse.moment(100)
 }
 ```
+
+> `handle` 只能通过 `s.handle = ...` 赋值，**不能经构造函数传入** —— `src/extends/sse.js:114` 的 `case 'handle'` 分支写的是 `this[k] = optionsp[k]`（`optionsp` 未定义），构造时传 `handle`/`handleClose`/`handleError` 会抛 ReferenceError。
+> 同理 `handleClose`、`handleError` 也需用赋值方式设置。SSE 各项默认值：`timeout 15000`、`retry 0`、`timeSlice 1000`、`mode 'timer'`。
 
 ---
 
@@ -2097,7 +2248,7 @@ pxy.init(app)
 |---|---|---|
 | `url` | 必填 | 后端地址，支持 `http://`、`https://`、`unix://` |
 | `path` | `'/'` | 匹配路径，会被规范成前缀路由 |
-| `weight` | `1` | 权重，数字越大被选中的比例越高 |
+| `weight` | `1` | 权重，数字越大被选中的比例越高。注意**只有 `weight > 1` 才会写入**权重信息，写 `1` 或 `0` 都等同于「未配置权重」，按无权重（等概率）参与选择 |
 | `timeout` | 继承实例 | 单次请求超时 |
 | `requestTimeout` | 继承实例 | 传输总时长上限 |
 | `maxBody` | 继承实例 | 请求体上限 |
@@ -2186,13 +2337,15 @@ app.run(1234)
 |---|---|---|
 | `connectTimeout` | `15000` | 新建 HTTP/2 连接的握手等待上限（毫秒）。此为 `Http2Proxy` 的默认值，连接池自身缺省为 `5000` |
 | `reconnDelay` | `500` | 断线重连退避阶梯的基准单位，实际间隔为基准 × 阶梯倍数 |
-| `reconnLadder` | `[1,2,4,8,16,32]` | 退避阶梯（`reconnDelay` 的倍数），走完一轮回到第一级循环 |
-| `maxConnect` | `100` | 单后端最大物理连接数 |
+| `maxConnect` | `10` | 单后端最大物理连接数。`Http2Proxy` 建池时用 `tmp.maxConnect \|\| 10`，所以**经 Http2Proxy 配置时的有效默认是 10**；连接池模块自身的内部默认才是 100。且此项要求 > 1 |
 | `maxAliveStreams` | `100` | 单连接并发流上限，收到对端 SETTINGS 后按 `min(配置, 对端声明)` 收敛 |
-| `minConnect` | `2` | 常驻连接数：零流量时保持不关闭，异常断开后低于此值自动补连。设为 `0` 关闭常驻 |
+
+> 以下三项**不能经 `Http2Proxy` 配置**，它们只存在于连接池模块 `Http2Pool` 自身的默认值中：`reconnLadder`（阶梯 `[1,2,4,8,16,32]`）、`minConnect`（常驻连接数 2）。把它们写进 `Http2Proxy` 的构造参数会触发「未知选项」告警并被忽略。需要调整请改用 `Http2Pool` 的接口。
+>
+> `Http2Proxy` 也**不支持** `methods`、`autoClearListeners` 这两项 Proxy 选项；它的 `timeout` 默认是 `30000`（Proxy 为 `35000`）。
 
 - **优雅重启**：收到对端 GOAWAY 后，连接立即停止接收新流，但会等待存量流完整收完再关闭（排水上限 30 秒），不会造成响应体被静默截断。
-- **空闲保活**：常驻名额（`minConnect`，默认 2）内的连接零流量时**不关闭**，仅周期性 `ping` 保活——持久连接是 HTTP/2 代理的核心优势（免握手、多路复用），且「握有活连接」本身就是后端可达的健康信号。超出常驻数的富余连接才会被优雅回收，且回收后不补连，因此零流量下既保持可用又不会空转重连。
+- **空闲保活**：常驻名额（连接池 `minConnect`，内部默认 2）内的连接零流量时**不关闭**，仅周期性 `ping` 保活——持久连接是 HTTP/2 代理的核心优势（免握手、多路复用），且「握有活连接」本身就是后端可达的健康信号。超出常驻数的富余连接才会被优雅回收，且回收后不补连，因此零流量下既保持可用又不会空转重连。
 - **重连退避**：后端不可用时重连间隔按阶梯放大，默认 500ms → 1s → 2s → 4s → 8s → 16s，**走完一轮回到 500ms 循环**，而不是停在最大间隔上。单调递增的退避一旦爬到最大间隔就不再回头，后端早已恢复却仍要空等一整个长间隔才被发现；循环阶梯既避免定频重连风暴，又让每轮都有一次快速探测，恢复延迟因此有上界。
 
 ---
@@ -2278,9 +2431,12 @@ let paramck = new ParamCheck({
   key: 'param',
   deny: ['x-key'], // 禁止提交的字段
   deleteDeny: true,
+  // errorMessage 是顶层选项，默认 "提交数据不符合要求"
+  errorMessage: '参数错误',
   rule: {
-    errorMessage: '参数错误', // 自定义错误信息
+    // 也可以只给某个字段单独指定错误信息
     mobile: {
+      errorMessage: '手机号格式不正确',
       callback: (obj, k, method) => {
         let preg = /^(12|13|15|16|17|18|19)[0-9]{9}$/
         return preg.test(obj[k])
@@ -2320,6 +2476,10 @@ let pmbody = new ParamCheck({
 app.use(pmbody, {method: ['POST', 'PUT'], name: 'login'})
 ```
 
+> body 检测的生效条件：`c.body !== c.rawBody && typeof c.body === 'object'`（`src/extends/paramcheck.js:238`）。也就是说只有被 bodyparser 成功解析成对象的请求才会检测，解析失败或是非对象 body 直接跳过。
+
+> ParamCheck 的选项 switch 对未知 key 是 `default: this[k] = options[k]`（`:52-54`）——**拼错的选项名不告警，会静默变成一个实例属性**。可用选项为 `key`、`rule`、`errorMessage`（默认 `"提交数据不符合要求"`）、`denyMessage`（默认 `'存在禁止提交的数据'`）、`deny`、`deleteDeny`；其中 `key` 只能是 `query`、`param`、`body`。
+
 ---
 
 ### 9. JWT (Token 验证)
@@ -2330,10 +2490,12 @@ JWT 协议的 Token 验证与签发。推荐使用 `Topbit.Token` 替代。
 const Topbit = require('topbit')
 const {JWT} = Topbit.extensions
 
-let j = new KWT({
-  timeout: 7200000, // 超时时间
+let j = new JWT({
+  expires: 7200000, // 有效期，单位毫秒，默认 3600000
+  // key: '你的密钥'  // 必须显式设定！不设定则每次启动随机生成 16 位密钥，
+                      // 重启或多进程之间签发的 token 会互相验不过。
 })
-j.alg = 'hs512' // 设置算法
+j.alg = 'hs512' // 设置算法（默认 SM3）
 
 // 签发 Token
 let token = j.make({
@@ -2346,15 +2508,17 @@ let token = j.make({
 let r = j.verify(token)
 
 // 作为中间件使用
-// 验证成功会将数据挂载到 ctx.box.user
+// 验证成功会将数据挂载到 ctx.user
 app.pre(j.mid()) 
 ```
+
+> `mid()` 读取的是 `c.headers.authorization` 的**原值**，不会剥掉 `Bearer ` 前缀（`src/extends/jwt.js:197`，读不到时才回退取 `c.query.token`）。若客户端按惯例发 `Authorization: Bearer xxx`，需要自己在进入中间件前净化前缀，否则恒定验签失败。
 
 ---
 
 ### 10. Cookie (Cookie 解析)
 
-解析前端请求消息头中的 Cookie，并在请求上下文中添加 `cookie` 属性。
+解析前端请求消息头中的 Cookie，结果挂在 `ctx.box.cookie` 上（**不是 `ctx.cookie`**）。没有 cookie 头时 `ctx.box.cookie` 为 `null`，读取前需判空；同名 cookie 取最后一个值，且不会自动 decode。
 
 ```javascript
 const Topbit = require('topbit')
@@ -2363,8 +2527,7 @@ const {Cookie} = Topbit.extensions
 app.use( new Cookie() )
 
 app.get('/', async ctx => {
-  // 获取解析后的 cookie 对象
-  console.log(ctx.cookie)
+  console.log(ctx.box.cookie)
 })
 
 app.run(1234)
@@ -2383,7 +2546,7 @@ const Topbit = require('topbit')
 const {Cookie,Session} = Topbit.extensions
 
 let sess = new Session()
-sess.init(app) // 初始化：添加 ctx 原型方法
+sess.init(app) // 初始化：往 ctx 原型添加会话方法
 
 // 必须先启用 Cookie，再启用 Session
 app.use( new Cookie() ).use( sess )
@@ -2391,19 +2554,22 @@ app.use( new Cookie() ).use( sess )
 app.get('/:key/:data', async ctx => {
   // 设置 Session
   ctx.setSession(ctx.param.key, ctx.param.data)
-  
+
   // 获取 Session (key 默认为 null 获取所有)
   let data = ctx.getSession()
-  
+
   ctx.ok(data)
 })
 
 app.run(1234)
 
 // 其他方法：
-// ctx.delSession(key) - 删除指定 Session
+// ctx.deleteSession(key) - 删除指定 Session
 // ctx.clearSession()  - 清空 Session
 ```
+
+> Session 依赖 Cookie 扩展：内部读写的是 `ctx.box.cookie`（`session.js:89`），所以必须先 `use(new Cookie())` 再 `use(sess)`。
+> `init()` 是把 `setSession/getSession/deleteSession/clearSession` 挂到**当前协议的** `app.httpServ.Context.prototype` 上；HTTP/1.1 与 HTTP/2 是两个不同的构造函数，只跑一种协议时按实际那个即可。
 
 ---
 
@@ -2418,7 +2584,7 @@ app.run(1234)
 
 'use strict'
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const parseArgv = Topbit.npargv
 
 let ret = parseArgv({
@@ -2516,6 +2682,8 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 - `list`：不是参数、也不以 - 开头的普通参数（如文件名）。
 - `command`：解析出的子命令（未启用子命令时为 null）。
 
+> 注意：strict 模式（默认）遇到错误是**提前 return**，此时返回对象只有 `{ ok, message, args }` 三项，**不含 `errors`、`list`、`command`**。直接访问 `ret.list[0]` 会在出错分支上抛 TypeError，读这三个字段前要先判存在。
+
 解析过程中，**未在描述中定义的参数（以 - 开头）会被忽略**，不会出现在 args 中（如示例中的 --local）。
 
 如果对参数的描述信息不是object类型，则会转换为boolean类型，此时name值即为参数的名字。参考-x参数。
@@ -2536,9 +2704,9 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 
 **type支持类型如下：**
 
-- int 或 number，整数类型。
+- int，整数类型（`parseInt` 解析）。
 
-- float，浮点数类型。
+- number 或 float，浮点数类型（`parseFloat` 解析）。注意 `number` 不是整数，文档旧写法「int 或 number，整数类型」不准确。
 
 - string，字符串类型。
 
@@ -2553,8 +2721,13 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 | min | 否 | 限制最小值。 |
 | max | 否 | 限制最大值。 |
 | default | 否 | 默认值。仅当参数**未传递**时生效；参数已传递但不合法时，strict 模式（默认）返回错误，strict:false 时保留默认值并把错误加入 errors。对 bool 同样有效（如 default:true）。 |
-| match | 否 | 正则表达式，若给定，会进行正则匹配。 |
+| alias | 否 | 别名，必须是字符串（如 `'-p'`），注册为同一条规则。别名写法要与原名一致：原名带 `=` 时别名也要带，否则匹配不上。 |
+| match | 否 | 正则表达式，若给定，会进行正则匹配。**必须传 RegExp 实例**，传字符串会被静默忽略。 |
 | callback | 否 | 函数，若给定，会把参数值传递到函数，若函数返回值不是undefined，则作为最后解析的值。 |
+
+> **不支持枚举/数组型选项。** 选项没有 `limit` 之类的取值白名单，写了也不生效（静默忽略）。要做取值白名单请用 `callback` 回落；要传列表请用逗号分隔一个字符串，再在 `callback` 里 split。
+>
+> 另外两条静默行为：同一个 flag 重复传时**后者覆盖前者**（没有数组累积）；`--flag=false` 对 bool 类型**仍解析为 true**（源码明确「暂不支持 --bool=false」，`src/lib/npargv.js:231`），要关闭布尔项只能不传。
 
 ### autoDefault自动设定默认值
 
@@ -2563,7 +2736,7 @@ $ node test.js x --host=1.2.3.4 --https --http2 --test --port=2010 --id 1,2,3,4,
 ```javascript
 'use strict'
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const parseArgv = Topbit.npargv
 
 let opts = {
@@ -2592,6 +2765,10 @@ let {args} = parseArgv(opts, { autoDefault: true })
 
 - 若type为number、int、float，则默认值为min属性给定的值，若没有min则默认值为0。
 
+> ⚠ 这条规则有一个容易踩的静默陷阱：`autoDefault` 默认为 true，所以**用户根本没有传该参数时，`args` 里依然会有值**（number/int/float 得到 `min`，没有 min 就是 0；string 得到空串）。后果是业务代码里 `args.port ?? 引擎默认端口` 这类「用 undefined 区分未传」的写法永远走不到。若需要区分「没传」与「传了 0」，必须显式传 `{ autoDefault: false }`，此时未传的参数不会出现在 `args` 中。
+
+> ⚠ `argv` 选项必须传**完整的 `process.argv`**（内部固定从下标 2 开始解析）。如果调用方先 `process.argv.slice(2)` 再传进来，第一个真实参数会被当成程序路径吃掉，表现为「参数配了却不生效」且毫无线索。
+
 ### 第一个参数作为子命令
 
 子命令通过**第二个参数 options** 定义（直接放在 schema 里的 `@command`/`@defaultCommand` 键无效）：
@@ -2614,7 +2791,8 @@ parseArgv(schema, {
 子命令规则：
 
 - 若未输入子命令、或第一个参数就是 `-` 开头，则使用 defaultCommand（若已设置）。
-- 若输入了不在列表中的命令：设置了 defaultCommand 时回退到默认命令，否则报错。
+- 只要给定 `commands` 且未显式设置 `defaultCommand`，框架会自动拿 `commands[0]` 当兜底默认命令。因此「不在列表里就报错」这一分支实际只在**显式传了 `defaultCommand: ''`** 之类的情形才可能走到。
+- 未知命令回退到默认命令时，那个词**不会被消耗**，仍会留在 `list` 或被当作参数值。
 - 错误处理遵循 strict 模式：strict（默认）立即返回错误；strict:false 时错误收集到 errors 并继续解析。
 
 ### 位置引用参数
@@ -2629,10 +2807,12 @@ parseArgv(schema, {
 
 - 如果启用了子命令（options.commands），则位置1会自动在解析时从子命令后开始。
 
+- ⚠ 位置号按 **argv 槽位**计算，**选项名和选项值同样占槽位**。而且 `$N` 的检查早于 `--key=value` 的解析（`src/lib/npargv.js:198-209`），所以像 `node x.js --https abc` 这样配置了 `$1` 时，`$1` 取到的是 `--https` 而不是 `abc`。使用位置参数时，请把位置参数排在选项之前，或改用 `list` 收集。
+
 注意：子命令是解析时的第一个参数，用于脚本的子命令功能。
 
 ```javascript
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const npargv = Topbit.npargv
 
 let {args} = npargv({
@@ -2655,6 +2835,8 @@ let {args} = npargv({
 
 TopbitLoader 是 Topbit 框架官方推荐的「自动化加载器」扩展，彻底告别手动 `app.get()`、`app.use()` 的繁琐写法。
 
+导出名有两个，它们是**并存的两种加载器实现**（`topbit.js:1349-1350` 同时导出），不是新旧版本关系：`Topbit.Loader`（别名 `Topbit.TopbitLoader`，`src/loader/loadernext.js`）是推荐使用的实现；`Topbit.ClassicLoader`（`src/loader/loader.js`）是另一套独立实现。两者配置项不通用 —— `deep`/`subgroup`/`multi`/`fileAsGroup` 只在 `ClassicLoader` 生效，传给 `Loader` 会被静默忽略。
+
 它实现了真正的 **MCM 模式**（Middleware → Controller → Model），类似 MVC 但更轻量、更符合 Topbit 的极致性能哲学。
 
 [🌐查看详细文档☛](./docs/topbit-loader.md)
@@ -2665,11 +2847,14 @@ TopbitLoader 是 Topbit 框架官方推荐的「自动化加载器」扩展，�
 
 TopbitToken 是专为 Topbit 框架打造的零依赖、极简、高安全的加密用户凭证（Token）系统。
 
-它完全基于 Node.js 原生 `crypto` 实现，支持：
+它完全基于 Node.js 原生 `crypto` 实现，支持的算法（`src/token/token.js` 的 `alg/algorithm` 白名单，大小写不敏感）：
 
 - AES-256-GCM（默认，推荐）
-- AES-192-GCM / AES-128-CBC / AES-256-CBC
-- 国密 SM4-CBC
+- AES-192-GCM
+- AES-128-CBC / AES-192-CBC / AES-256-CBC
+- 国密 SM4-CBC（`sm4` 是其别名，会被归一为 `sm4-cbc`）
+
+注意 GCM 与 CBC 的 IV 长度不同：非 GCM 算法会把 `iv` 重置为 16 字节随机串（`ivLength=16`），所以自定义 `iv` 只对 GCM 系列有意义。
 
 [🌐查看详细文档☛](./docs/topbit-token.md)
 

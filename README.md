@@ -16,7 +16,7 @@ Topbit is a server-side Web framework based on Node.js. It has no third-party de
 *   **Load Monitoring:** Displays child process load status.
 *   **Body Parsing:** Parses body data by default.
 *   **HTTP/1.1 & HTTP/2:** Supports enabling HTTP/1.1 or HTTP/2 via configuration. Allows simultaneous support for HTTP/2 and HTTP/1.1.
-*   **HTTPS Support:** Supports HTTPS configuration (HTTP/2 service requires HTTPS).
+*   **HTTPS Support:** Supports enabling HTTPS via configuration. Pure HTTP/2 can run over cleartext (h2c), but browsers require HTTPS to use HTTP/2 (it depends on TLS ALPN negotiation); `allowHTTP1` compatibility mode likewise requires HTTPS.
 *   **Request Limiting:** Limits the maximum number of visits per single IP within a specific time period.
 *   **IP Blacklist and Whitelist.**
 *   **Memory Management:** In cluster mode, monitors child processes and restarts them if they exceed the maximum memory limit.
@@ -35,6 +35,16 @@ You can also install via yarn:
 yarn add topbit
 ```
 
+**This document corresponds to topbit v3.7.3.** The framework requires Node.js v14.18 or above (only the major version is checked at startup; below 14 it exits directly). Current LTS is recommended.
+
+**Command line tools shipped with the package** (the `bin` field of `package.json`):
+
+| Command | Script | Purpose |
+|---|---|---|
+| `tbload` | `bin/loadinfo.sh` | Clears the screen every 0.35 s and `cat`s the load file, for **viewing** the load information written to `loadInfoFile`. Usage: `tbload /tmp/topbit-loadinfo.log`. It only polls and displays — it is **not** a start/stop service manager. |
+| `topbit-new-app` | `bin/newapp.js` | Copies the built-in template into a new entry file, default name `app.js`; the first argument may specify the target filename. If the target already exists it prints "file already exists" and skips — it never overwrites. |
+| `new-route` | `bin/new-ctl.js` | Generates a controller template file whose header carries a JSDoc typedef for `context`, used together with the Loader directory conventions. |
+
 ## Minimal Example
 
 ```javascript
@@ -46,15 +56,20 @@ const app = new Topbit({
   debug: true
 })
 
-//in debug mode, output service info
+//in debug mode, output service info and run the service
+//printServInfo(timeout=0, debug=true): with timeout>0 the output is delayed, otherwise it
+//is printed within a microtask; the first argument may also be a boolean (taken as debug).
+//It only prints when debug is true and config.debug is true.
+//Under cluster, workers hand the route table to the master via a message for unified printing.
+//Returns this, so run() can be chained onto it.
 app.printServInfo().run(1234)
 ```
 
-When no routes are added, Topbit adds a default route:
+When no routes are added, Topbit registers a single default route (`GET /*`, GET only):
 
 `/*`
 
-Visiting via a browser will show a very simple page. This is merely for initial understanding and documentation access; it will not affect actual development.
+Visiting via a browser will show a very simple page. This is merely for initial understanding and documentation access; it will not affect actual development. Other request methods (POST, PUT, etc.) still go through the notFound handling.
 
 ## Add a Route
 
@@ -72,7 +87,7 @@ app.get('/', async ctx => {
   ctx.to('success')
 })
 
-// Defaults to listening on 0.0.0.0, parameters are consistent with the native listen interface.
+// Defaults to listening on 0.0.0.0, two parameters run(port, host), port defaults to 2368.
 app.printServInfo().run(1234)
 
 ```
@@ -108,6 +123,13 @@ GET POST PUT PATCH DELETE OPTIONS  TRACE HEAD
 
 The first 6 are the most commonly used. For each request type, the router has a corresponding lowercase function for mounting routes. For convenience, after initializing the app, you can use the shortcut calls with the same names on the `app` instance. (The framework supports these types.)
 
+Besides the same-named shortcuts, there are two multi-method mounting entry points:
+
+- `app.any(path, callback, name)`: mounts the route to all 8 request methods at once.
+- `app.map(methods, path, callback, name)`: mounts by an array of methods, e.g. `app.map(['GET','HEAD'], '/p', handler)`.
+
+Route callbacks (and middleware callbacks) **must be `async` functions**. A synchronous function is rejected at registration time with `callback and middleware function must use async` (`src/midcore.js:96`).
+
 **Example:**
 
 ``` JavaScript
@@ -141,14 +163,18 @@ app.put('/p', async c => {
   })
 })
 
-// Defaults to listening on 0.0.0.0
+// Defaults to listening on 0.0.0.0, two parameters run(port, host), port defaults to 2368.
+// port may also be an object, but only host is recognized from it; the port still comes from the first argument.
 app.printServInfo().run(8080)
 
 ```
 
 ## Get URL Parameters
 
-- Query strings in the URL (parameters like `?a=1&b=2`) are parsed into `c.query`.
+- Query strings in the URL (parameters like `?a=1&b=2`) are parsed into `c.query`. The `#` fragment and everything after it is stripped and not parsed.
+- The number of parameters is capped by `maxQuery` (default **25**): beyond the cap the excess is **silently dropped**, with no error and no warning, which shows up as "the later parameters are missing". Raise this option when you send many parameters.
+- By default (`fastParseQuery: false`) same-named parameters are aggregated into an array; set it to `true` to keep only the first value and never produce an array.
+- `autoDecodeQuery` defaults to `true`, i.e. `decodeURIComponent` is applied to query values. If a value itself contains an unescaped `%`, decoding throws `URIError`; turn this option off and handle it yourself in that case.
 - Form submitted data is parsed into `c.body`.
 
 > The content-type for forms is `application/x-www-form-urlencoded`.
@@ -164,13 +190,14 @@ let app = new Topbit({
 
 app.get('/q', async c => {
   // Query strings after ? in URL are parsed into query.
-  // Returns JSON text, main difference is content-type in header is text/json
+  // Returns JSON text, the main difference is that content-type in the header is application/json;charset=utf-8
   c.to(c.query)
 })
 
 app.post('/p', async c => {
-  // Data submitted via POST/PUT is saved to body. 
-  // If it's a form, it is automatically parsed; otherwise, raw text value is saved.
+  // Data submitted via POST/PUT/PATCH/DELETE is saved into body.
+  // Forms and application/json are parsed into an object, text/* into a string,
+  // and for any other content-type body is the raw Buffer (i.e. rawBody).
   // Middleware can be used to handle various data types.
   c.to(c.body)
 })
@@ -181,7 +208,7 @@ app.run(2019)
 
 ## Get POST Data
 
-Requests that submit body data are POST and PUT. In front-end pages, this is usually form submission or asynchronous requests.
+Requests that submit body data are POST, PUT, PATCH and DELETE. In front-end pages, this is usually form submission or asynchronous requests.
 
 - Form submitted data is parsed into `c.body`.
 
@@ -189,7 +216,9 @@ Requests that submit body data are POST and PUT. In front-end pages, this is usu
 
 > Asynchronous request data often has a content-type of `application/json`.
 
-For both types above, `c.body` will be an object.
+For both types above, `c.body` will be an object. When `application/json` fails to parse, the framework returns 400 directly with the body `bad json data`. The number of form key/value pairs is limited by `maxFormKey` (default 100); the excess is silently not parsed.
+
+For any other content-type, `c.body` points to the original Buffer (i.e. `c.rawBody`); only `text/*` is converted into a utf8 string. So do not use `typeof c.body === 'string'` to cover every non-form case.
 
 ``` JavaScript
 'use strict'
@@ -199,7 +228,7 @@ const Topbit = require('topbit')
 let app = new Topbit({debug: true})
 
 app.post('/p', async c => {
-  // POST/PUT data saved to body. Forms are auto-parsed to object.
+  // POST/PUT/PATCH/DELETE data is saved into body; forms are auto-parsed to object.
   // Middleware can be used to process various data.
   c.to(c.body)
 });
@@ -216,7 +245,7 @@ Basic form types are parsed into `c.body` as a JS object.
 
 **text/\***
 
-If content-type is `text/*` (starts with text/), such as `text/json`, the framework does not parse it. It simply converts the uploaded data to a string in utf8 format and assigns it to `c.body`. Subsequent processing is decided by the developer.
+If content-type is `text/*` (starts with text/), such as `text/plain` or `text/csv`, the framework does not parse it. It simply converts the uploaded data to a string in utf8 format and assigns it to `c.body`. Subsequent processing is decided by the developer.
 
 **multipart/form-data;boundary=xxx**
 
@@ -256,7 +285,6 @@ app.get('/randerr', async c => {
       Equivalent to:
         c.status(404).data = 'not found'
     */
-   // You can use chain calls in versions above v22.4.6.
     c.status(404).oo('not found')
   }
 })
@@ -267,7 +295,9 @@ app.run(1234)
 
 ## Chain Calls
 
-You can use chain calls for `setHeader`, `status`, and `sendHeader`.
+`setHeader`, `status`, `sendHeader`, `write` and `removeHeader` all return `this` and can be chained. The chaining capability is implemented by the framework itself and does not depend on the Node.js version.
+
+`to` and its aliases `ok` and `oo` do not return `this` (they return undefined) and can only be the last link of a chain.
 
 ```javascript
 
@@ -276,11 +306,13 @@ app.get('/', async c => {
   c.setHeader('content-type', 'text/plain; charset=utf-8')
     .setHeader('x-server', 'nodejs server')
     .status(200)
-    .to(`${Date.now()} Math.random()}`)
+    .to(`${Date.now()} ${Math.random()}`)
 
 })
 
 ```
+
+> When headers actually take effect differs between the two protocols: HTTP/1.1 `setHeader` calls `res.setHeader` directly, so the headers are already written out at that point; HTTP/2 `setHeader` only caches into `ctx.dataHeaders`, and `stream.respond` is not called until `sendHeader`/`write`/`pipe`. Also, only HTTP/2's `setHeader` accepts an object as its first argument for bulk setting.
 
 ## Route Parameters
 
@@ -289,7 +321,7 @@ app.get('/:name/:id', async c => {
   // Use : to indicate route parameters, request params are parsed into c.param
   let username = c.param.name;
   let uid = c.param.id;
-  c.to(`${username} ${id}`)
+  c.to(`${username} ${uid}`)
 })
 
 app.run(8000)
@@ -310,21 +342,30 @@ app.get('/static/*', async c => {
 
 ```
 
+Two points to note:
+
+- `starPath` **has no leading slash**. A request for `/static/images/a.jpg` matching `/static/*` gives `starPath` = `images/a.jpg`.
+- `/static/*` also matches `/static` itself, in which case `starPath` is an empty string.
+
 ----
 
 ## Route Lookup Rules
 
 ----
 
-The route lookup process strictly controls the order of parameterized routes and routes with `*`, rather than matching based on addition order.
-
-Applications developed with previous versions are unaffected; there are no compatibility issues. Stricter ordering reduces the likelihood of conflicts.
+The route lookup process strictly controls the order of parameterized routes and routes with `*`, rather than matching based on addition order. Stricter ordering reduces the likelihood of conflicts.
 
 Route Lookup Strategy:
 
 1.  Ordinary string paths.
 2.  Parameterized routes (routes with fewer parameters match first).
 3.  Routes with `*` (matched in longest-to-shortest pattern).
+
+Three additional constraints of the current implementation:
+
+- Extra slashes in the request path are already tolerated — `/x//y` is equivalent to `/x/y` (this is fixed framework behavior; there is no slash-matching switch).
+- The path segment limit is 13 (`router.maxDepth`); requests beyond it go straight to 404.
+- After normalization a given string can only be registered once; registering it again throws "conflict, added more than once". Star and parameterized routes get their prefix index and static-segment tree built at `run()` time, so **routes must all be registered before `run()`**; parameterized/star routes added afterwards never enter the index and can never be matched.
 
 ```
 Example:
@@ -359,7 +400,7 @@ r.checkRoute('/x/:id/*')
 // { ok: false, message: '...', route: '/x/:id/*' }
 ```
 
-When `ok` is `false`, `message` explains the problem and `route` is the normalized route string (the form in which this route would actually be registered).
+When `ok` is `false`, `message` explains the problem and `route` is the normalized route string (the form in which this route would actually be registered); when the argument is not a string, `route` is the empty string.
 
 What it checks:
 
@@ -376,7 +417,7 @@ It does **not** check pattern conflicts or duplicate route names. Those depend o
 
 `addPath()` calls `checkRoute()` internally, so the two always agree.
 
-Route strings are also normalized at registration: consecutive slashes are collapsed, a missing leading slash is added, and a trailing slash is stripped. `router.normalizeRoute(path)` returns that normalized form — `//api//v2//` and `/api/v2` are the same route.
+Route strings are also normalized at registration: leading/trailing whitespace is trimmed first, then consecutive slashes are collapsed, a missing leading slash is added, and a trailing slash is stripped; the empty string normalizes to `/`. `router.normalizeRoute(path)` returns that normalized form — `//api//v2//` and `/api/v2` are the same route.
 
 ----
 
@@ -387,13 +428,19 @@ You can use `app.middleware` to specify middleware and use the returned `group` 
 **topbit.prototype.middleware(mids, options=null)**
 
 - `mids` is an array. Each element is a middleware function or an array where the first element is the middleware and the second is the options for adding that middleware.
-- `options` defaults to `null`. Pass an object for options applying to all `mids`, e.g., `{pre: true}`.
+- `options` defaults to `null`. Pass an object for options applying to all `mids`, e.g., `{pre: true}`. If an array element carries its own options (`[mid, {method:'POST'}]`), the element-level options are merged with these common options, and **the element level wins**.
+- The return value is an object containing only the single property `group` (`{ group }`); the route methods are reached through `group()`. `use()` cannot be called on the return value directly.
 
 **topbit.prototype.group(group_name, callback, prefix=true)**
 
-- `group_name` is a string representing the route group name. If it is a valid path, it also serves as the route prefix.
-- `callback` is a callback function. The parameters received by the callback can still call `middleware` and `group`, as well as `get`, `post`, etc., to add routes.
-- `prefix` is a boolean, defaults to `true`. It controls whether `group_name` is added as a route prefix. However, it only acts as a prefix if `group_name` is a valid route string.
+- `group_name` is a string representing the route group name. When it matches the **prefix character set** (`/`? + letters/digits/`_`/`-`/`/`, length 1~500, see `src/router.js:21`), it is also concatenated into the path as the route prefix.
+- `callback` is a callback function. The parameters received by the callback can still call `middleware` and `group`, as well as `get`, `post`, etc., to add routes. If the second argument is a boolean, it is treated as `prefix`: the callback is not executed and only the mountable route object is returned.
+- `prefix` is a boolean, defaults to `true`. It controls whether `group_name` is added as a route prefix. It only acts as a prefix when `group_name` matches the prefix character set above.
+
+> **When a group name does not become a prefix, the framework neither throws nor warns** — the routes are silently registered on the path without the prefix.
+> Note that the prefix character set **does not include `.` `@` `:`**, even though those characters are legal inside a full route: `app.group('v1.0', ...)` and `app.group('v1:2', ...)` register `/u`, not `/v1.0/u`. For version-style group names write `v1_0`, or put the prefix into the route string itself.
+>
+> `@` is the group *reference* marker, not part of a name: `app.use(mid, '@web')` strips the `@` and attaches to the group `web`, whereas `app.group('@web', ...)` names the group `@web` — the two never meet and the middleware is silently skipped. Likewise the object form `app.use(mid, {group: '@web'})` does **not** strip the `@` (the key is `@web`). **Never put `@` in a group name; add `@` only when referencing a group in string form.**
 
 ```javascript
 'use strict'
@@ -435,8 +482,8 @@ app.use(
   })
 })
 
-// Test: Does not conform to route rules, so it won't be a path prefix.
-app.group('Test', route => {
+// Not a valid prefix (contains '.'), so it is not prepended to the path and the framework stays silent.
+app.group('v1.0', route => {
   route.get('/test', async c => {
     console.log(c.group, c.name)
     c.to('test ok')
@@ -494,8 +541,9 @@ app.middleware([
         c.to(c.param)
       })
 
-      // Subgroup /sub enables middleware sub_mid_test.
-      // Simultaneously, subgroups inherit all middleware from the upper layer.
+      // Subgroup /sub enables middleware sub_mid_test. Middleware registered through
+      // middleware() is inherited by subgroups, but note: middleware attached directly to
+      // the parent with use/pre is NOT pushed down to subgroups (see the note below).
       route.middleware([sub_mid_test])
         .group('/sub', sub => {
             sub.get('/:key', async c => {
@@ -559,8 +607,8 @@ route.get('/:name', async c => {
   c.to(c.param)
 })
 
-// Subgroup /sub enables middleware sub_mid_test.
-// Subgroup inherits upper layer middleware.
+// Subgroup /sub enables middleware sub_mid_test; middleware registered through
+// middleware() is inherited by subgroups (use/pre attached to the parent is not).
 route.middleware([sub_mid_test])
   .group('/sub', sub => {
       sub.get('/:key', async c => {
@@ -644,6 +692,8 @@ This structure is designed based on the data construction of HTTP protocol file 
 
 `c.getFile` indexes by name. The default index value is 0. If a number less than 0 is passed, it gets the entire file array; returns null if not found.
 
+> The file objects have **no `data` field**: `start`/`end`/`length` are only the byte range of that file inside `c.rawBody`, the content always stays in `rawBody`. To read the bytes use `c.rawBody.slice(f.start, f.end)`; to give the file object a `.toFile()` writing capability you must mount the `ToFile` extension (see the extensions chapter) — the base context does not provide it. Treating `f.data` as the content and testing it for emptiness will mark every upload invalid.
+
 ## Max Body Data Limit
 
 ```javascript
@@ -652,7 +702,7 @@ This structure is designed based on the data construction of HTTP protocol file 
 const Topbit = require('topbit')
 
 const app = new Topbit({
-  // Allows POST or PUT request data max value to be approx 20MB.
+  // Allows the maximum data size submitted via POST/PUT/PATCH/DELETE to be approx 20MB.
   // Unit is bytes.
   maxBody: 20000000
 })
@@ -662,6 +712,10 @@ const app = new Topbit({
 app.run(1234)
 
 ```
+
+`maxBody` is the real gate on upload size: the framework decides and rejects by `content-length` before the body has been read, so it never buffers an entire request body into memory before checking it.
+
+A related option is `maxFiles` (default 12), which limits **the number of file parts parsed out of one request**; the excess is **silently dropped** — no error, and no indication that files went missing. So when accepting multi-file uploads, compare `Object.keys(c.files).length` yourself.
 
 ## Middleware
 
@@ -817,7 +871,7 @@ app.run(1234)
 
 ## Simultaneous Support for HTTP/2 and HTTP/1.1 (Compatibility Mode)
 
-Compatibility mode utilizes the ALPN protocol and requires HTTPS, so certificates and keys must be configured.
+Compatibility mode uses ALPN to negotiate h2 and http/1.1 on the same port. **ALPN only exists in the TLS handshake, so compatibility mode requires HTTPS** (this does not contradict "pure HTTP/2 can run over h2c": h2c has no ALPN and cannot do this same-port protocol negotiation). Certificates and keys must therefore be configured.
 
 ```javascript
 'use strict'
@@ -844,7 +898,7 @@ Full configuration options for app initialization are as follows. Please read th
 ``` JavaScript
   {
     // This config represents max bytes for POST/PUT form submission and file uploads.
-    maxBody   : 8000000,
+    maxBody   : 50000000,
 
     // Max number of files to parse
     maxFiles      : 12,
@@ -867,7 +921,7 @@ Full configuration options for app initialization are as follows. Please read th
     errorLogFile : '',
 
     // Max lines per log file
-    logMaxLines: 50000,
+    logMaxLines: 20000,
 
     // Max number of historical log files
     logHistory: 50,
@@ -888,12 +942,12 @@ Full configuration options for app initialization are as follows. Please read th
 
     // Server options written in 'server', passed during http service initialization. Reference http2.createSecureServer, tls.createServer
     server : {
-      handshakeTimeout: 8192, // TLS handshake timeout
+      handshakeTimeout: 9000, // TLS handshake (HANDSHAKE) timeout
       //sessionTimeout: 350,
     },
 
     // Set server timeout in ms. Specific request timeouts can be set in specific requests.
-    timeout   : 15000,
+    timeout   : 20000,
 
     debug     : false,
 
@@ -901,13 +955,13 @@ Full configuration options for app initialization are as follows. Please read th
     useLimit: false,
 
     // Max connections, 0 means no limit
-    maxConn : 1024,
+    maxConn : 2560,
 
     // Max connections per single IP within unit time, 0 means no limit
     maxIPRequest: 0,
 
-    // Rate limit unit time for IP, 1 means 1 second. Default 60 seconds. Range 0.1 ~ 86400.
-    unitTime : 60,
+    // Rate limit unit time for IP, 1 means 1 second. Default 30 seconds. Range 0.1 ~ 86400.
+    unitTime : 30,
     
     // Display load info, requires enabling cluster mode via daemon interface
     loadMonitor : true,
@@ -920,19 +974,19 @@ Full configuration options for app initialization are as follows. Please read th
     loadInfoFile : '',
 
     // Data to return for 404
-    notFound: 'Not Found',
-    
-    // Data to return for 400
-    badRequest : 'Bad Request',
+    notFound: 'not found',
 
-    // Percentage parameter controlling max memory usage for child processes. Range -0.42 ~ 0.36. Base is 0.52, so default is 80%.
+    // Data to return for 400
+    badRequest : 'bad request',
+
+    // Percentage parameter controlling max memory usage for child processes. Range -0.45 ~ 0.45. Base is 0.52, so default is 80%.
     memFactor: 0.28,
 
-    // Max URL length
-    maxUrlLength: 2048,
+    // Max URL length, including path and querystring. Range 1 ~ 4096.
+    maxUrlLength: 1152,
 
-    // Timer milliseconds for child process resource reporting.
-    monitorTimeSlice: 640,
+    // Timer milliseconds for child process resource reporting. Range 5 ~ 10000.
+    monitorTimeSlice: 500,
 
     // When globalLog is true, record real IP address? Mainly used in reverse proxy mode.
     realIP: false,
@@ -940,8 +994,10 @@ Full configuration options for app initialization are as follows. Please read th
     // Max allowed querystring parameters.
     maxQuery: 25,
 
-    // Enable strong mode? If enabled, processes rejectionHandled and uncaughtException events,
+    // Enable strong mode? If enabled, processes unhandledRejection and uncaughtException events,
     // and captures errors: TypeError,ReferenceError,RangeError,AssertionError,URIError,Error.
+    // strong can be true, or an object ({ quiet, errorHandle, catchErrors }).
+    // Note: errors not listed in catchErrors still trigger console.error and process.exit(1).
     strong: false,
 
     // Fast querystring parsing. Multiple values with same name only set the first one, not parsed as array.
@@ -970,13 +1026,37 @@ Full configuration options for app initialization are as follows. Please read th
     maxLoadRate: 0.75,
 
     // http2 protocol http2Stream timeout. If not set, -1 means consistent with timeout.
+    // Note: -1 is only an input convention; it is normalized to the actual timeout value at
+    //       construction, so reading app.config.streamTimeout does NOT give you -1.
     streamTimeout: -1,
 
     // Request timeout. This is total request time, mainly to counter malicious requests.
     // e.g. Slowloris attacks where 1 byte is sent per second.
     // Idle timeout won't work, allowing long-term resource occupation.
     // This is a DDoS attack.
-    requestTimeout: 100000,
+    requestTimeout: 65000,
+
+    // Whether to parse body data automatically. When false, the framework does not mount the
+    // built-in bodyparser middleware and you must handle body yourself.
+    parseBody: true,
+
+    // In multipart format, max number of form key/value pairs; the excess is silently not parsed.
+    maxFormKey: 100,
+
+    // Max entries in the IP rate-limit cache; minimum 1024.
+    maxIPCache: 100000,
+
+    // Fallback CPU count, used only when os.cpus() returns 0; default 0 means no fallback.
+    cpus: 0,
+
+    // IP blacklist; either a Set or an (ip) => boolean function.
+    deny: null,
+
+    // IP whitelist; either a Set or an (ip) => boolean function.
+    allow: null,
+
+    // Whether to start in daemon (cluster) mode; can also be started via app.daemon().
+    daemon: false,
 
   };
   // For HTTP status codes, only these two are needed here. Others don't strictly need full support, 
@@ -985,6 +1065,16 @@ Full configuration options for app initialization are as follows. Please read th
   // Before that, the framework prepares for the onion model execution, which is very fast.
 
 ```
+
+**Configuration activation rules**
+
+Not every value above is free to take. The framework validates the type and range of every option (`src/optionsCheck.js`):
+
+- When validation fails, **only a delayed yellow warning is printed and the value is NOT written into `config`** — the actual behavior is "silently keep the default", with no throw and no aborted startup. When a config change appears to have no effect, check the console for this warning first.
+- An unrecognized option name likewise only produces an "unknown option" warning and is then ignored.
+- Value whitelists: `logType` accepts only `'stdio'`, `'file'` or `''`; `loadInfoType` accepts only `null`, `'null'`, `'text'`, `'obj'`, `'orgobj'`.
+- Numeric ranges: `memFactor` -0.45 ~ 0.45; `maxUrlLength` 1 ~ 4096; `monitorTimeSlice` 5 ~ 10000; `maxLoadRate` 0.15 ~ 0.98; `maxIPCache` >= 1024; `logMaxLines` 1 ~ 5000000; `unitTime` 0.1 ~ 86400 (the unit is seconds).
+- `key` and `cert` must be provided **together** to take effect and automatically set `https` to true; giving only one of them is ignored. A function-valued `server.SNICallback` also sets `https` to true automatically.
 
 ## Request Context
 
@@ -1005,27 +1095,31 @@ Request context is an object encapsulating various request data. This design han
 | query | URL passed parameters. |
 | param | Route parameters. |
 | files | Uploaded file information. |
-| body | Body request data. Format depends on content-type (string, object, buffer). |
-| port | Client request port number. |
+| body | Body request data. The format depends on content-type: `application/x-www-form-urlencoded` and `application/json` are parsed into an object, `text/*` into a string, and for any other content-type it is the raw Buffer (i.e. rawBody). |
+| port | The client's **source port**, i.e. `socket.remotePort` — not the port the service is listening on. |
 | ip | Client request IP address (socket address). Check x-real-ip or x-forwarded-for if using proxy. |
 | headers | Points to `request.headers`. |
-| isUpload() | Is it a file upload request? Checks if content-type header is multipart/form-data. |
+| isUpload | Boolean property (**not a function**): whether this is a file upload request, i.e. whether the content-type header is in multipart/form-data format. |
 | name | Route name, defaults to empty string. |
 | group | Route group, defaults to empty string. |
 | res | HTTP/1.1 points to response, HTTP/2 points to stream. |
 | req | HTTP/1.1 is `IncomingMessage` object, HTTP/2 points to stream object. |
 | box | Defaults to empty object. Can add any property value to dynamically pass info to next layer components. |
 | service | Object for dependency injection, points to `app.service`. |
-| data | Saves final data to return to client. Assign to data or use `ctx.to`. Pre-v24.x was `ctx.res.body`. |
-| ext | Provides helper functions. See wiki. |
-| to(data) | Function to set `ctx.data`. |
-| write(data) | Directly write data to client. |
-| moveFile(file:object, target_filepath:string) | Function to move uploaded file to specified path. |
-| status() | Function to set status code. |
-| setHeader(k, v) | Function to set header. |
-| removeHeader(k) | Function to remove header waiting to be sent. |
-| getFile(name) | Function to get uploaded file info (reads files property). |
-| sendHeader() | Function to send headers for http2. `setHeader` only caches headers. For http/1.1, this is an empty function for code consistency. |
+| data | Saves final data to return to client. Assign to data or use `ctx.to`. |
+| dataEncoding | Encoding used when writing out a string `data`; defaults to `utf8`. |
+| rawBody | The original Buffer of the request body; use it when body is not parsed or when working byte-wise. |
+| bodyLength | Bytes of body received so far. |
+| requestCall | Reference to the route handler function hit by this request. |
+| ext | Helper function collection, containing: `aesDecrypt aesEncrypt bigId ctype delay extName extnameType hmacsha1 makeId makeName md5 nrand pipe randstring readFile readb serialId sha1 sha256 sha512 sm3 timestr uuid writeFile`. |
+| to(data) | Function to set `ctx.data`. Returns undefined, so it cannot be a middle link of a chain; the aliases `ok` and `oo` point to the same function. |
+| write(data) | Directly write data to client. Under HTTP/2, if the headers have not been sent yet this triggers respond first. |
+| moveFile(file:object, target_filepath:string) | Function to write an uploaded file out to the given path. The implementation slices `ctx.rawBody` by `file.start`/`file.length` and writes a new file (`fs.open(target,'w+',0o644)`), returning the bytes written; it is not a rename, and it throws ENOENT if the target directory does not exist. |
+| status() | With a number it sets the status code and returns this; **with no argument it returns the current status code** (HTTP/2 reads `:status`, defaulting to 200). |
+| setHeader(k, v) | Function to set headers. HTTP/1.1 calls `res.setHeader` directly, so the headers are written out at that point; HTTP/2 only caches into `ctx.dataHeaders` and sends them on `sendHeader`/`write`/`pipe`. Only HTTP/2 accepts an object as the first argument for bulk setting. |
+| removeHeader(k) | Function to remove a header waiting to be sent. On HTTP/1.1 it throws if called after the response headers have already been sent. |
+| getFile(name, ind = 0) | Function to get uploaded file info; it reads the `files` property. `ind` defaults to 0 (first file); a negative value returns the whole array for that field; returns null when the field is missing or the index is out of range. |
+| sendHeader() | Function to send the headers. HTTP/2 calls `stream.respond` with the cached headers; on HTTP/1.1 it is **not an empty function** — it runs `res.writeHead(res.statusCode)` while the headers are still unsent. Both return this. |
 | user | Standard property for user login, defaults to null. |
 | json(data) | Function, sets return data and marks type as json. |
 | text(data) | Function, sets return data and marks type as text. |
@@ -1034,8 +1128,12 @@ Request context is an object encapsulating various request data. This design han
 | pipeJson(filepath) | Stream file data as json type. |
 | pipeText(filepath) | Stream file data as text type. |
 | pipeHtml(filepath) | Stream file data as html type. |
+| dataHeaders | **Exists only on HTTP/2 contexts.** The object where `setHeader` caches headers; sent as a whole via respond by `sendHeader`. |
+| stream | **Exists only on HTTP/2 contexts.** Points to the current http2stream. |
 
 Note: `to` function only sets `ctx.data` value; data is returned at the end. It's same as direct assignment, but function calls reveal errors faster (wrong assignment adds a property without error but returns incorrect data).
+
+> There are two request-context implementations, one per protocol: HTTP/1.1 uses context1, pure HTTP/2 (without `allowHTTP1`) uses context2; with `allowHTTP1` enabled the same instance uses one or the other per request. Code shared across protocols must not depend on members that exist in only one context — object-form `setHeader`, `dataHeaders`, `stream`.
 
 ## Dependency Injection
 
@@ -1073,9 +1171,13 @@ app.run(1234)
 
 ```
 
+Alongside `addService` there are `app.getService(key)` for reading and `app.clearService()` for emptying. `c.service` points at the `app.service` object itself; replacing `app.service = {...}` wholesale only works **before `run()`** (`run()` syncs the new target into the service layer). While running, assign item by item instead — otherwise already-established references are not updated.
+
 ## Extending Request Context
 
-To add extension support to the request context object, use `app.httpServ.context`. This property is the constructor for the request context.
+To add extension support to the request context object, use `app.httpServ.Context`. This property is the request context's **constructor** (note the **capital `C`** — `http1.js:27` and `http2.js:27` both do `this.Context = Context`; with the lowercase `context` you get `undefined` and `.prototype` throws a TypeError right away).
+
+HTTP/1.1 and HTTP/2 use two different context constructors and must be extended separately, or extended conditionally on the current protocol.
 
 **Example:**
 
@@ -1089,7 +1191,7 @@ const app = new Topbit({
 })
 
 // 'this' represents the request context
-app.httpServ.context.prototype.testCtx = function () {
+app.httpServ.Context.prototype.testCtx = function () {
     console.log(this.method, this.path)
 }
 
@@ -1103,7 +1205,7 @@ app.run(1234)
 
 ## app.isMaster and app.isWorker
 
-Node.js v16.x recommends `isPrimary` over `isMaster`. However, `isMaster` is still available. After Topbit initialization, `app` has two getters: `isMaster` and `isWorker`. They function identically to `cluster` properties. Purposes:
+The Node.js cluster module recommends `isPrimary` in place of `isMaster` (`isMaster` is still available). After topbit initializes the app instance, `app` carries three getter properties: `isMaster`, `isPrimary` and `isWorker`. They act exactly like the corresponding `cluster` properties. The purpose is:
 
 - Avoid writing `const cluster = require('cluster')` again.
 - Shield future incompatible changes in `cluster`, enhancing code compatibility.
@@ -1114,7 +1216,7 @@ Node.js v16.x recommends `isPrimary` over `isMaster`. However, `isMaster` is sti
 
 `daemon` first two parameters match `run`. Third parameter is a number indicating how many child processes to use. Defaults to 0, which automatically creates child processes based on CPU core count. It maintains stable child process count, creating new ones if any terminate unexpectedly.
 
-**In cluster mode, max child processes will not exceed 2x CPU cores.**
+**On the child-process ceiling: if the number passed exceeds 2x the CPU core count, it is NOT clamped to 2x — it is discarded entirely and the default policy takes over** (`topbit.js:1273-1285`). The default policy is: take the CPU core count, and subtract 1 when there are more than 2 cores. Passing `0` also uses the default policy.
 
 Example:
 
@@ -1155,8 +1257,8 @@ const app = new Topbit({
   // Enable global log
   globalLog: true,
 
-  // Output to file. Default is 'stdio' (terminal).
-  logType: 'file'
+  // Output to file. Default is 'stdio' (terminal). Choices: stdio | file
+  logType: 'file',
 
   // Log file for status codes 2xx or 3xx
   logFile : '/tmp/topbit.log',
@@ -1195,6 +1297,8 @@ Based on the `message` event, in daemon mode (based on cluster module), a `setMs
 
 This requires the message sent by worker processes to be an object, with a mandatory `type` property indicating the event name. Other fields can be custom.
 
+`app.setMsgEvent(evt, callback, mode='always')`: the third argument may be `always` (default, fires repeatedly) or `once` (fires once then is removed). The callback receives `(worker, msg, handle)`. `app.getMsgEvent(evt)` queries a registration and `app.removeMsgEvent(evt)` removes one; both entry points return immediately inside a worker process — they only take effect in the master.
+
 Usage:
 
 ``` JavaScript
@@ -1218,12 +1322,12 @@ if (cluster.isMaster) {
     console.log(msg)
   })
 } else {
-  // Receive message sent by worker.to
+  // Receive messages sent by worker.send
   process.on('message', msg => {
     console.log(msg)
   })
 
-  setIneterval(() => {
+  setInterval(() => {
     process.send({
       type : 'test-msg',
       pid : process.pid,
@@ -1235,7 +1339,9 @@ if (cluster.isMaster) {
 
 ```
 
-Sending messages from worker processes is complex. Since version 22.4.0, a `send` method is provided for quick message sending. It only sends to master from a worker process, so no extra worker check is needed.
+The awkward part is that sending messages from a worker process is complex, so a `send` method is provided for quick message sending. It only sends to the master when running inside a worker process, so no extra worker check is needed.
+
+`app.send(evtname, msg, handle)`: when `msg` is a string or a number it is wrapped as `{msg: value}`, then `msg.type = evtname` is written. Note that **an empty `msg` returns silently** (`''`, `0`, `false` and `undefined` are all not sent) — to send an empty message use the object form.
 
 ## app.send and app.workerMsg
 
@@ -1306,8 +1412,6 @@ app.daemon(1234, 2)
 ```
 
 When load is high, child processes are created. After a period of idleness, processes with 0 connections are terminated, restoring the base number.
-
-**Available in v21.9.6+. Please use the latest version as this feature has been improved for stability and performance in subsequent versions.**
 
 ----
 
@@ -1395,7 +1499,15 @@ const app = new Topbit({
 // In this case, you must set event listeners manually.
 
 let http_server = http.createServer(app.httpServ.onRequest())
-let https_server = https.createServer(app.httpServ.onRequest())
+
+// The https server must be given a certificate itself, otherwise the TLS handshake cannot complete
+const fs = require('node:fs')
+let https_server = https.createServer({
+    key: fs.readFileSync('./cert/localhost-privkey.pem'),
+    cert: fs.readFileSync('./cert/localhost-cert.pem')
+  },
+  app.httpServ.onRequest()
+)
 
 http_server.listen(2025)
 https_server.listen(2026)
@@ -1406,7 +1518,7 @@ https_server.listen(2026)
 
 ## Request Limiting
 
-The framework provides IP-based rate limiting to prevent dense requests from the same IP. For HTTP/2, use `http2limit` module from `topbit-toolkit`.
+The framework's rate limiting works by counting and filtering on IP addresses, to keep a single IP from sending requests densely. With HTTP/2 it must be paired with the `StreamLimit` extension — the source file is `http2limit.js`, but the key registered in `Topbit.extensions` is **`StreamLimit`** (the two names differ).
 
 ```javascript
 'use strict';
@@ -1458,7 +1570,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 ## Other
 
-- After running, Topbit has a final wrapper middleware. Setting `c.data` returns data. It detects simple text types and sets content-type automatically (text/plain, text/html, application/json) if not set.
+- After running, Topbit has a final wrapper middleware doing the last processing, so setting `c.data` returns data. The content-type is inferred from the data shape: an object becomes `application/json;charset=utf-8`; for a string, one starting with `{`/`[` becomes `application/json;charset=utf-8`, one starting with `<!` becomes `text/html;charset=utf-8`, everything else `text/plain;charset=utf-8` (note it only recognizes the `<!` prefix — a lone `<` is not treated as html). Two preconditions: **you have not set content-type yourself**, and the response headers have not been sent yet; otherwise the framework never interferes.
 
 - Defaults to limiting max URL length and sets a max memory usage rate based on hardware.
 
@@ -1466,7 +1578,7 @@ app.daemon(1234, '0.0.0.0', 3)
 
 - It is fast, and we focus on optimization. If comparing, add multiple middleware and hundreds of routes to test.
 
-- Provides a `sched` function to quickly set cluster scheduling policy ('rr' or 'none'). Sets `cluster.schedulingPolicy`.
+- Provides a `sched` function to quickly set the cluster scheduling policy, supporting the arguments `'rr'` or `'none'` — it just sets `cluster.schedulingPolicy`. **Passing any other value (including none) does not return `this` but the current `schedulingPolicy`**, so it cannot be chained onto unconditionally.
 
 The framework automatically detects memory size and sets limits on initialization. You can change limits via properties in `secure` after init, but this requires using `daemon` (master managing workers).
 
@@ -1502,8 +1614,6 @@ app.daemon(8008, 2);
 
 **Note: Requires `loadMonitor` option (enabled by default).**
 
-Here is the English translation of the document:
-
 ---
 
 # 🧩 Middleware Extensions and Other Extensions 📜
@@ -1527,7 +1637,7 @@ All middleware extensions are located under `Topbit.extensions`. Example:
 
 process.chdir(__dirname)
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 
 // Import extensions via destructuring assignment
 const {Cors, ToFile} = Topbit.extensions
@@ -1568,8 +1678,25 @@ app.run(1235)
 | **SNI** | Support for multi-domain HTTPS (Server Name Indication). |
 | **ParamCheck** | Request parameter validation, supporting checks for `param`, `query`, and `body`. |
 | **JWT** | Token verification using the JWT protocol. (Note: `Topbit.Token` is recommended instead as it is much stronger than JWT). |
-| **Cookie** | Parses cookies from the frontend request headers. |
-| **Session** | Session management using a local file mechanism. |
+| **Cookie** | Parses the `cookie` request header from the frontend; the result is on `ctx.box.cookie`. |
+| **Session** | Session management using a local file mechanism; depends on Cookie. For testing and teaching only. |
+| **RealIP** | Recovers the real client IP from `x-real-ip` / `x-forwarded-for`; essential behind a reverse proxy. |
+| **Referer** | Referer whitelist check (anti-hotlinking); failures return the configured status code. |
+| **Timing** | Measures the duration of each route per request method; can be written to a file. |
+| **MixLogger** | Aggregates or takes over the framework log; under cluster it collects the logs of all workers. |
+| **SetFinal** | Custom final response handler, settable per protocol. |
+| **StreamLimit** | Rate limiting for dense streams on a single HTTP/2 connection (the source file is `http2limit.js`). |
+| **ProxyNoAgent** | HTTP/1.1 reverse proxy without an Agent; options basically match `Proxy`. |
+| **Http2Pool** | HTTP/2 upstream connection pool, used internally by `Http2Proxy` — **not a middleware, do not register it directly**. |
+
+> The keys in this table come from `Topbit.extensions` and take **the exported item's own `.name`, unrelated to the file name** — e.g. `http2limit.js` is exported as `StreamLimit`. Files starting with `_` or `!` are skipped (`src/_loadExtends.js:17-20`).
+
+**Registration contract for class-style extensions** (required reading when writing your own): when `app.use/pre/add` receives an instance, only two shapes are accepted, otherwise it throws `callback and middleware function must use async` right away (`src/midcore.js:80-96`):
+
+1. The instance has a `mid()` method — the framework calls it and uses its **return value** as the middleware (the returned function must be async);
+2. The instance has a `middleware` method — it must be declared `async` (constructor name `AsyncFunction`), and the framework binds it to the instance automatically.
+
+Plain objects, synchronous functions and arrow functions satisfy neither and throw at registration. Also note: only Proxy / ProxyNoAgent / Http2Proxy warn about unknown constructor options; every other extension has its own switch whitelist and silently ignores misspelled keys.
 
 ---
 
@@ -1592,13 +1719,17 @@ let cr = new Cors({
         'https://www.a.com',
     ],
 
-    // Defaults to content-type only
+    // Defaults to authorization and content-type
     allowHeaders : 'authorization,content-type',
 
     // Caches OPTIONS requests for 60 seconds; the browser will read from cache during this period.
     optionsCache: 60,
 
-    // Defaults to '*', sets allowed request methods.
+    // Allowed request methods, defaults to '*'. To set methods use methods (maps to the access-control-allow-methods response header)
+    // methods : ['GET','POST','PUT'],
+
+    // requestHeaders maps to the access-control-request-headers response header and defaults to '*'.
+    // It is NOT the option for setting allowed methods — do not confuse it with methods.
     // requestHeaders : '*'
 
     // Defaults to '', indicating which headers can be exposed to the requester. Multiple headers are separated by commas.
@@ -1615,15 +1746,17 @@ app.options('/*', async c => {})
 **Advanced Configuration (Referer Check & Grouping):**
 
 ```javascript
-let cr = new cors({
+let cr = new Cors({
   // Do not allow empty referer
   allowEmptyReferer: false,
 
   // Route groups that allow empty referer.
   // Group names are custom; refer to the framework's route grouping feature.
-  // This is mainly used when API development also needs to serve pages.
+  // Note: these are the group NAMES themselves, without @ — the framework stores ctx.group
+  // with the reference @ already stripped, so '@webapp' would never match.
+  // This is mainly used when an API service also serves pages.
   emptyRefererGroup: [
-    '@webapp', '@pages'
+    'webapp', 'pages'
   ],
 
   allow: [
@@ -1692,14 +1825,18 @@ let st = new Resource({
     // Set the value of the cache-control header, defaults to null
     cacheControl: 'max-age=3600',
     
-    // Maximum total cache size (default 120MB)
-    maxCacheSize: 120_000_000,
+    // Maximum total cache size (default 128MB)
+    maxCacheSize: 128_000_000,
 
     // Failure limit and cache release probability
     failedLimit: 50,
-    prob: 6
+    prob: 6,
+
+    // Interval (ms) for re-validating cached files, default 600000. On expiry the file is stat'ed again and compared by size+mtime
+    // checkInterval: 600000,
 })
 
+// The second argument of init can specify the group this instance serves; when omitted it takes the routeGroup value from the example above
 st.init(app)
 
 // Automatically added to the _static group.
@@ -1710,8 +1847,11 @@ app.get('/favicon.ico', async c => {}, {group: '_static'})
 **Interface Description:**
 *   `addType(obj)`: Add mapping from extension to content-type.
 *   `clearCache()`: Clear the cache.
-*   `removeCache(path)` / `removeNameCache(name)`: Drop cache entries by path or name fragment, adjusting the accounted size.
+*   `removeCache(path)` / `removeNameCache(name)` / `removeGroupCache(filepre)`: Drop cache entries by path, name fragment or group prefix, adjusting the accounted size.
 *   `canCache()`: Whether a new cache entry can still be admitted.
+*   `init(app, group)`: The second argument can specify the group this instance serves; when omitted it takes the constructor option `routeGroup`.
+
+> Resource's constructor options are its own switch whitelist, **with no unknown-option warning** (unlike the Proxy family) — a misspelled key is silently ignored and shows up as "the configuration had no effect".
 
 **Content coding negotiation**
 
@@ -1743,8 +1883,11 @@ const {ToFile} = Topbit.extensions
 app.use( new ToFile() )
 
 app.post('/upload', async c => {
-    // Get the uploaded file object
+    // Get the uploaded file object (the first one when several share the same upload name)
     let f = c.getFile('image')
+
+    // All files under that upload name: pass a negative second argument
+    // let all = c.getFile('image', -1)
 
     if (!f) {
         return c.status(400).oo('image file not found')
@@ -1760,6 +1903,8 @@ app.post('/upload', async c => {
 
 app.run(1234)
 ```
+
+> ToFile only replaces `getFile` on `multipart/form-data` requests (when `c.isUpload` is true), and only then do the file objects carry a `toFile` method; on ordinary JSON/form requests you still get the plain objects. It also has to be mounted **before the routes are registered**, otherwise the `getFile` inside a route is not the enhanced one.
 
 ---
 
@@ -1819,12 +1964,15 @@ let s = new SSE({
   mode: 'yield' // Enable generator mode
 })
 
-s.handle = (ctx) => {
+s.handle = async (ctx) => {
     ctx.sendmsg({event: 'eat', data: 'Rice'})
     // Use await ctx.sse.moment(ms) for delay
     await ctx.sse.moment(100)
 }
 ```
+
+> `handle` can only be assigned with `s.handle = ...`, **it cannot be passed through the constructor** — the `case 'handle'` branch in `src/extends/sse.js:114` reads `this[k] = optionsp[k]` (`optionsp` is undefined), so passing `handle`/`handleClose`/`handleError` at construction throws a ReferenceError.
+> For the same reason `handleClose` and `handleError` must also be set by assignment. SSE defaults: `timeout 15000`, `retry 0`, `timeSlice 1000`, `mode 'timer'`.
 
 ---
 
@@ -2144,10 +2292,12 @@ app.run(1234)
 |---|---|---|
 | `connectTimeout` | `15000` | Handshake wait limit for a new HTTP/2 connection (ms). This is the `Http2Proxy` default; the pool itself falls back to `5000` |
 | `reconnDelay` | `500` | Base unit of the reconnect backoff ladder; actual interval is base × ladder multiplier |
-| `reconnLadder` | `[1,2,4,8,16,32]` | Backoff ladder as multiples of `reconnDelay`; wraps back to the first rung after the last |
-| `maxConnect` | `100` | Max physical connections per backend |
-| `maxAliveStreams` | `100` | Max concurrent streams per connection, converged to `min(config, peer SETTINGS)` |
-| `minConnect` | `2` | Resident connections kept open while idle; also the refill threshold after an abnormal disconnect. Set `0` to disable |
+| `maxConnect` | `10` | Max physical connections per backend. `Http2Proxy` builds the pool with `tmp.maxConnect \|\| 10`, so **the effective default when configured through Http2Proxy is 10**; only the connection-pool module's own internal default is 100. This option must be &gt; 1 |
+| `maxAliveStreams` | `100` | Max concurrent streams per connection, converged to `min(config, peer SETTINGS)` after the peer's SETTINGS arrive |
+
+> The following options **cannot be configured through `Http2Proxy`** — they only exist in the connection-pool module `Http2Pool`'s own defaults: `reconnLadder` (the ladder `[1,2,4,8,16,32]`) and `minConnect` (2 resident connections). Writing them into the `Http2Proxy` constructor arguments triggers an "unknown option" warning and they are ignored. Use the `Http2Pool` interface to change them.
+>
+> `Http2Proxy` also does **not** support the Proxy options `methods` and `autoClearListeners`; its `timeout` default is `30000` (Proxy uses `35000`).
 
 - **Graceful restart**: on GOAWAY the connection stops accepting new streams immediately but drains in-flight streams to completion (30s cap) before closing, so response bodies are never silently truncated.
 - **Idle keepalive**: connections within the resident quota (`minConnect`, default 2) are **never** closed when idle — they are kept alive with periodic `ping`. Persistent connections are the whole point of an HTTP/2 proxy (no handshake, multiplexing), and holding a live connection is itself the reachability signal `ok()` reports. Only surplus connections are reclaimed, and they are not reconnected, so a zero-traffic backend stays usable without spinning on reconnects.
@@ -2236,9 +2386,12 @@ let paramck = new ParamCheck({
   key: 'param',
   deny: ['x-key'], // Fields forbidden to submit
   deleteDeny: true,
+  // errorMessage is a TOP-LEVEL option, defaults to "提交数据不符合要求"
+  errorMessage: '参数错误',
   rule: {
-    errorMessage: 'Parameter Error', // Custom error message
+    // A single field can also be given its own error message
     mobile: {
+      errorMessage: '手机号格式不正确',
       callback: (obj, k, method) => {
         let preg = /^(12|13|15|16|17|18|19)[0-9]{9}$/
         return preg.test(obj[k])
@@ -2278,6 +2431,10 @@ let pmbody = new ParamCheck({
 app.use(pmbody, {method: ['POST', 'PUT'], name: 'login'})
 ```
 
+> The body check only takes effect when `c.body !== c.rawBody && typeof c.body === 'object'` (`src/extends/paramcheck.js:238`). That is, only requests successfully parsed into an object by the bodyparser are checked; a parse failure or a non-object body is skipped outright.
+
+> ParamCheck's option switch falls through to `default: this[k] = options[k]` for unknown keys (`:52-54`) — **a misspelled option name produces no warning, it silently becomes an instance property**. The usable options are `key`, `rule`, `errorMessage` (default `"提交数据不符合要求"`), `denyMessage` (default `'存在禁止提交的数据'`), `deny`, `deleteDeny`; `key` may only be `query`, `param` or `body`.
+
 ---
 
 ### 9. JWT (Token Verification)
@@ -2289,9 +2446,12 @@ const Topbit = require('topbit')
 const {JWT} = Topbit.extensions
 
 let j = new JWT({
-  timeout: 7200000, // Timeout duration
+  expires: 7200000, // validity in milliseconds, default 3600000
+  // key: 'your secret'  // Must be set explicitly! Without it a random 16-character key is
+                         // generated on every start, so tokens issued before a restart — or by
+                         // another process — never verify against each other.
 })
-j.alg = 'hs512' // Set algorithm
+j.alg = 'hs512' // Set algorithm (default SM3)
 
 // Issue Token
 let token = j.make({
@@ -2304,15 +2464,17 @@ let token = j.make({
 let r = j.verify(token)
 
 // Use as middleware
-// On successful verification, data is mounted to ctx.box.user
-app.pre(j.mid()) 
+// On successful verification, data is mounted to ctx.user
+app.pre(j.mid())
 ```
+
+> `mid()` reads the **raw value** of `c.headers.authorization` and does not strip the `Bearer ` prefix (`src/extends/jwt.js:197`; only when that header is absent does it fall back to `c.query.token`). If clients send `Authorization: Bearer xxx` as is customary, sanitize the prefix yourself before the middleware runs, or verification fails every time.
 
 ---
 
 ### 10. Cookie (Cookie Parsing)
 
-Parses Cookies from the frontend request headers and adds a `cookie` property to the request context.
+Parses the Cookie request header from the frontend; the result is mounted on `ctx.box.cookie` (**not `ctx.cookie`**). With no cookie header `ctx.box.cookie` is `null`, so test for it before reading; when the same name appears twice the last value wins, and no automatic decoding is done.
 
 ```javascript
 const Topbit = require('topbit')
@@ -2322,7 +2484,7 @@ app.use( new Cookie() )
 
 app.get('/', async ctx => {
   // Get parsed cookie object
-  console.log(ctx.cookie)
+  console.log(ctx.box.cookie)
 })
 
 app.run(1234)
@@ -2358,9 +2520,12 @@ app.get('/:key/:data', async ctx => {
 app.run(1234)
 
 // Other methods:
-// ctx.delSession(key) - Delete specific Session
+// ctx.deleteSession(key) - Delete specific Session
 // ctx.clearSession()  - Clear all Sessions
 ```
+
+> Session depends on the Cookie extension: internally it reads and writes `ctx.box.cookie` (`session.js:89`), so `use(new Cookie())` must come before `use(sess)`.
+> `init()` mounts `setSession/getSession/deleteSession/clearSession` onto **the current protocol's** `app.httpServ.Context.prototype`; HTTP/1.1 and HTTP/2 are two different constructors, so when you only run one protocol the actual one is enough.
 
 ---
 
@@ -2373,7 +2538,7 @@ app.run(1234)
 ```javascript
 'use strict'
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const parseArgv = Topbit.npargv
 
 let ret = parseArgv({
@@ -2509,7 +2674,7 @@ Sometimes the program requires parameters to be returned, using default values i
 ```javascript
 'use strict'
 
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const parseArgv = Topbit.npargv
 
 let opts = {
@@ -2571,7 +2736,7 @@ However, the positional index differs from internal indexing:
 Note: the subcommand is the first argument parsed, used for script subcommand functionality.
 
 ```javascript
-const Topbit = require('Topbit')
+const Topbit = require('topbit')
 const npargv = Topbit.npargv
 
 let {args} = npargv({

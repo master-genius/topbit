@@ -23,7 +23,7 @@ project/
 │   ├── user.js             # → /user group
 │   ├── admin/              # Sub-group
 │   │   ├── __mid.js        # Middleware only for admin group
-│   │   └── index.js        # → /admin
+│   │   └── index.js        # → /admin/index (no index collapsing)
 │   └── api/
 │       ├── __mid.js        # api group middleware, inherited by subdirectories
 │       └── v1/
@@ -38,6 +38,8 @@ project/
 ```
 
 **Directory nesting**: Subdirectories may be nested up to **two levels** (e.g. `api/v1/`). Directory depth maps to route depth.
+
+**Route naming**: route = `directory/filename (without .js)`. There is **no `index` collapsing** — `admin/index.js` yields `/admin/index`, not `/admin`. If you want the `/admin` path, name the file `controller/admin.js`.
 
 **Middleware inheritance**: A directory-level `__mid.js` is automatically **inherited by all of its subdirectories and files** (subdirectories without their own `__mid.js` still inherit the parent's). Execution follows the onion model — middleware added first runs first (outermost); global middleware is outermost, deeper directories sit closer to the business handler.
 
@@ -75,7 +77,7 @@ app.autoWorker(16)
 
 Run `node app.js` → full-featured service is up!
 
-> **Re-entrancy guard**: A Loader instance loads only once — repeated `init()` calls are blocked with a warning. To serve multiple route sets on the same app, create multiple Loader instances with different `prePath`; they do not interfere with each other.
+> **Re-entrancy guard**: A Loader instance loads only once — a repeated `init()` call returns silently at the entry point, loading nothing and emitting no warning at all. To serve multiple route sets on the same app, create multiple Loader instances with different `prePath`; they do not interfere with each other.
 
 ---
 
@@ -84,21 +86,24 @@ Run `node app.js` → full-featured service is up!
 | Option               | Type               | Default       | Description                                                                                     |
 |----------------------|--------------------|---------------|-------------------------------------------------------------------------------------------------|
 | `appPath`            | string             | `.`           | Project root directory                                                                         |
-| `controllerPath`     | string             | `./controller`| Controller folder                                                                               |
-| `midwarePath`        | string             | `./middleware`| Middleware class folder                                                                         |
+| `controllerPath`     | string             | `./controller`| Controller folder — **relative to `appPath` only** (absolute paths have no effect, see Path rules below)  |
+| `midwarePath`        | string             | `./middleware`| Middleware folder, same path rules as above                                                                |
 | `prePath`            | string             | `''`          | Global route prefix (e.g. `/api/v1`)                                                            |
 | `name`               | string             | `'loader'`    | Loader name, used as the key injected into `app.service` (set distinct names for parallel instances) |
 | `optionsRoute`       | boolean            | `true`        | Auto-add `OPTIONS /xxx/*` wildcard routes for CORS preflight; disable only if you handle OPTIONS yourself |
-| `homeFile`           | string             | `''`          | Which file serves the root `/` route (e.g. `'index.js'`)                                        |
+| `homeFile`           | string             | `''`          | Which file additionally serves the root `/` route; the value is a **directory-carrying path relative to the controller folder**: `'index.js'` at top level, `'/admin/index.js'` for a nested file (leading `/` required) |
 | `initArgs`           | any                | `app.service` | Arguments passed to every controller’s `init()` method                                          |
 | `beforeController`   | function           | `null`        | Hook executed after controller instantiation, before route registration                       |
 | `afterController`    | function           | `null`        | Hook executed after route registration                                                         |
 | `modelLoader`        | async function     | `null`        | Powerful extension point – custom model loading (recommended with topbit-model)               |
 
+**Path rules (`controllerPath` / `midwarePath`)**: these two options take effect only when the value does **not** start with `/`; the value is then joined as `appPath + '/' + value`. If you pass an absolute path starting with `/`, the corresponding branch does nothing and the configuration keeps its defaults `appPath + '/controller'` and `appPath + '/middleware'` — the absolute path is silently ignored, no error and no effect. To point elsewhere, use an absolute `appPath` (which does accept a leading `/`) together with relative sub-folder names.
+
 **Fixed behavior**:
 
 - **File as group**: every controller file automatically becomes its own route group; directory-level middleware is mounted onto every file group under that directory (always on, no configuration needed).
-- **Idempotent `init()`**: repeated `init()` on the same instance is blocked; there is no built-in hot reload (use `nodemon` / `pm2 --watch` for file-change restarts during development).
+- **Idempotent `init()`**: a repeated `init()` on the same instance returns silently at the entry point — nothing is reloaded and no warning is printed; there is no built-in hot reload (use `nodemon` / `pm2 --watch` for file-change restarts during development).
+- **`deep` / `subgroup` / `multi` / `fileAsGroup` only take effect in `Topbit.ClassicLoader`** (`src/loader/loader.js`). The `Topbit.Loader` this document describes (alias `Topbit.TopbitLoader`, i.e. `src/loader/loadernext.js`) has no handling for these options — they fall through to the default branch and are silently ignored. The two are **coexisting implementations** (`topbit.js` exports both), not an old/new version relationship. Their behaviour in `Loader` is fixed: nesting depth is two levels, file-as-group is always on, and the re-entrancy guard is per-instance and cannot be disabled.
 
 **Most common production config:**
 
@@ -188,6 +193,8 @@ module.exports = Index
 new Loader({ homeFile: 'index.js' }).init(app)
 ```
 
+> `homeFile` is compared against `pathname` — a **directory-carrying file path relative to the controller folder** (never including `prePath`), not a bare file name. So a top-level file is `'index.js'`, while a homepage inside a subdirectory must be written as `'/admin/index.js'` (with directory and leading `/`) — `'admin/index.js'` or a plain `'index.js'` will not match `admin/index.js`. The match also only takes effect if that controller implements `get`, and `/` is registered as an **extra** route on top of the normal one (`admin/index.js` still exposes `/admin/index`).
+
 ---
 
 ### 6. Middleware Writing Guide
@@ -276,6 +283,8 @@ new Loader({
 
 The `service` passed to `modelLoader` is `app.service`; injected models are usable inside controllers via `c.service.xxxModel`.
 
+> **The `cb` of `init(app, cb)` / `daemonInit(app, cb)` is not awaited**: the source simply calls `cb(app)` — no `await`, and its return value is ignored. If you mount routes asynchronously inside `cb` (anything involving `app.use` / `app.add` that needs awaiting), that work detaches from the loading flow and may complete only after the service has already started accepting requests. Put asynchronous preparation in `modelLoader` (which *is* awaited) and keep `cb` for synchronous startup calls.
+
 ---
 
 ### 8. Naming & Safety Rules
@@ -294,7 +303,7 @@ The `service` passed to `modelLoader` is `app.service`; injected models are usab
 | Multiple API versions coexist   | Create multiple Loader instances with `prePath: '/v1'`, `prePath: '/v2'` (optionally with distinct `name`) |
 | Temporarily disable a controller / directory | Prefix the file or folder name with `!`, e.g. `!old-user.js`                                  |
 | Plugin system                   | Each plugin has its own folder → `new Loader({ appPath: './plugins/xxx' }).init(app)`                |
-| Dev hot reload                  | Use `nodemon` or `pm2 --watch` to restart on file changes (the loader itself does not support repeated `init()`) |
+| Dev hot reload                  | Use `nodemon` or `pm2 --watch` to restart on file changes (a repeated `init()` on the same instance is silently ignored — no new code is loaded) |
 
 ---
 

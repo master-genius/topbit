@@ -21,7 +21,7 @@ project/
 │   ├── user.js            # /user 路由组
 │   ├── admin/             # /admin 路由组（子目录自动识别）
 │   │   ├── __mid.js       # admin 组专用中间件
-│   │   └── index.js       # /admin
+│   │   └── index.js       # /admin/index（index 不折叠）
 │   └── api/
 │       ├── __mid.js       # api 组中间件，会被子目录继承
 │       └── v1/
@@ -36,6 +36,8 @@ project/
 ```
 
 **目录嵌套规则**：子目录支持嵌套，**最多两层**（如 `api/v1/`）。目录层级即路由层级。
+
+**路由名规则**：路由 = `目录/文件名（去掉 .js）`，**没有 `index` 折叠**——`admin/index.js` 得到的是 `/admin/index`，不是 `/admin`。想要 `/admin` 这个路径，就把文件命名为 `controller/admin.js`。
 
 **中间件继承**：目录级 `__mid.js` 的中间件会被**其所有子目录及文件自动继承**（子目录没有自己的 `__mid.js` 时同样继承父级）。执行顺序按「先添加先执行」的洋葱模型：全局中间件最外层，目录越深越靠近业务处理。
 
@@ -73,7 +75,7 @@ app.autoWorker(16)
 
 只需执行 `node app.js` 即可启动完整服务！
 
-> **防重入**：同一个 Loader 实例只会执行一次加载（重复调用 `init()` 会被拦截并给出警告）。如需在同一 app 上并行加载多套不同 `prePath` 的路由，创建多个 Loader 实例即可——实例之间互不干扰。
+> **防重入**：同一个 Loader 实例只会执行一次加载（重复调用 `init()` 会在入口静默返回，既不重复加载，也不会输出任何警告）。如需在同一 app 上并行加载多套不同 `prePath` 的路由，创建多个 Loader 实例即可——实例之间互不干扰。
 
 ---
 
@@ -82,21 +84,24 @@ app.autoWorker(16)
 | 配置项               | 类型               | 默认值         | 说明                                                                                                                    |
 |----------------------|--------------------|----------------|-------------------------------------------------------------------------------------------------------------------------|
 | `appPath`            | string             | `.`            | 项目根目录（一般不用改）                                                                                                 |
-| `controllerPath`     | string             | `./controller` | 控制器目录                                                                                                              |
-| `midwarePath`        | string             | `./middleware` | 中间件类目录                                                                                                            |
+| `controllerPath`     | string             | `./controller` | 控制器目录，**只接受相对 `appPath` 的路径**（绝对路径写法不生效，见下方「路径规则」）                                     |
+| `midwarePath`        | string             | `./middleware` | 中间件目录，路径规则同上                                                                                                 |
 | `prePath`            | string             | `''`           | 全局路由前缀，例如 `/api/v1`                                                                                            |
 | `name`               | string             | `'loader'`     | 加载器命名，注入到 `app.service` 的键名（多实例并行时可设为不同值）                                                       |
 | `optionsRoute`       | boolean            | `true`         | 自动为每个目录添加 `OPTIONS /xxx/*` 通配路由（CORS 预检必备），关闭后须自行处理 OPTIONS                                  |
-| `homeFile`           | string             | `''`           | 指定哪个文件作为首页路由 `/`，例如 `'index.js'`                                                                          |
+| `homeFile`           | string             | `''`           | 指定哪个文件作为首页路由 `/`，值是**相对 controller 目录、带目录的路径**：顶层写 `'index.js'`，子目录写 `'/admin/index.js'`（含前导 `/`） |
 | `initArgs`           | any                | `app.service`  | 传给每个控制器的 `init()` 参数                                                                                           |
 | `beforeController`   | function           | `null`         | 控制器实例化后、注册路由前执行                                                                                           |
 | `afterController`    | function           | `null`         | 路由注册完成后执行                                                                                                       |
 | `modelLoader`        | async function     | `null`         | **最强大的扩展点**：自定义模型加载逻辑，推荐配合 `topbit-model` 使用                                                    |
 
+**路径规则（`controllerPath` / `midwarePath`）**：这两个选项只在传入值**不以 `/` 开头**时生效，此时按 `appPath + '/' + 值` 拼接；如果传入以 `/` 开头的绝对路径，对应分支什么都不做，配置里保留的仍然是默认值 `appPath + '/controller'`、`appPath + '/middleware'`——也就是说绝对路径写法会被静默忽略，既不报错也不生效。需要指向别处时，请改用绝对的 `appPath`（`appPath` 本身支持以 `/` 开头）配合相对的子目录名。
+
 **固定行为说明**：
 
 - **文件即分组**：每个控制器文件自动成为一个独立的路由分组，目录级中间件会精确挂载到该目录下的每个文件分组（无需配置，恒生效）。
-- **`init()` 幂等**：同一实例重复 `init()` 会被拦截，无热更新支持（开发时可用 `nodemon` / `pm2 --watch` 实现文件变更自动重启）。
+- **`init()` 幂等**：同一实例重复 `init()` 在入口即静默返回——不重复加载，也不会输出任何警告；无热更新支持（开发时可用 `nodemon` / `pm2 --watch` 实现文件变更自动重启）。
+- **`deep` / `subgroup` / `multi` / `fileAsGroup` 只在 `Topbit.ClassicLoader`（`src/loader/loader.js`）生效**：本文档所述的 `Topbit.Loader`（别名 `Topbit.TopbitLoader`，即 `src/loader/loadernext.js`）的选项处理里没有这几项，传入后会落到默认分支被静默忽略。两者是**并存的两种实现**（`topbit.js` 同时导出），不存在新旧版本关系。`Loader` 的对应行为是固定的：嵌套深度两层、文件恒为分组、防重入为实例级且不可关闭。
 
 **最常用配置示例**：
 
@@ -187,6 +192,8 @@ module.exports = Index
 new Loader({ homeFile: 'index.js' }).init(app)
 ```
 
+> `homeFile` 比对的是 `pathname`——**相对 controller 目录、带目录的文件路径**（不含 `prePath`），不是纯文件名。所以顶层文件写 `'index.js'`，嵌套目录下的首页必须写 `'/admin/index.js'`（带目录和前导 `/`），写 `'admin/index.js'` 或只写 `'index.js'` 都匹配不上 `admin/index.js`。另外该匹配只在控制器实现了 `get` 时才生效，且 `/` 是在原有路由之外**额外**注册的一条（`admin/index.js` 依然同时暴露 `/admin/index`）。
+
 ---
 
 ### 六、中间件（Middleware）写法
@@ -275,6 +282,8 @@ new Loader({
 
 `modelLoader` 返回的 `service` 是 `app.service`，注入的模型可直接在控制器（`c.service.xxxModel`）中使用。
 
+> **`init(app, cb)` / `daemonInit(app, cb)` 的 `cb` 不会被 await**：源码里只是 `cb(app)`，没有 `await`，也不看返回值。如果在 `cb` 内做异步的路由挂载（`app.use` / `app.add` 之类需要等待的操作），它会脱离加载流程异步进行，可能在服务已经开始接收请求之后才完成。需要异步准备请放进 `modelLoader`（这个是 `await` 的），`cb` 里只写同步的启动调用。
+
 ---
 
 ### 八、安全与命名规范
@@ -293,7 +302,7 @@ new Loader({
 | 多个版本 API 并行             | 创建多个 Loader 实例，分别使用 `prePath: '/v1'`、`prePath: '/v2'`（可配不同 `name` 区分）|
 | 临时禁用某控制器/目录          | 文件或目录名前加 `!` 前缀，如 `!old-user.js`                              |
 | 插件化开发                    | 每个插件一个独立目录，`new Loader({ appPath: './plugins/xxx' }).init(app)` |
-| 开发热重载                    | 用 `nodemon` 或 `pm2 --watch` 监听文件变更自动重启进程（加载器本身不支持重复 `init()`）|
+| 开发热重载                    | 用 `nodemon` 或 `pm2 --watch` 监听文件变更自动重启进程（同一实例重复 `init()` 会被静默忽略，不会加载新代码）|
 
 ---
 
