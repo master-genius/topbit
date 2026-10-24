@@ -8,7 +8,7 @@ const npargv = Topbit.npargv
 
 const fs = require('node:fs')
 
-let args = npargv({
+let {args} = npargv({
   '--port': {
     name: 'port',
     type: 'number',
