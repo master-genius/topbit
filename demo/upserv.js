@@ -12,6 +12,7 @@ let app = new Topbit({
 
 let {ToFile,Timing} = Topbit.extensions
 
+//测试请求耗时的中间件，实际生产环境不必启用
 app.pre(new Timing({test: true}))
 
 app.use(new ToFile, {group: 'upload'})

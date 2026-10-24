@@ -5,6 +5,7 @@ process.chdir(__dirname)
 let Topbit = require('../src/topbit.js')
 let {Loader} = Topbit
 const npargv = Topbit.npargv
+const os = require('node:os')
 
 let {args} = npargv({
   '--loadtype': {
@@ -44,7 +45,7 @@ let ld = new Loader()
 
 ld.daemonInit(app, () => {
   app.sched('none')
-    .autoWorker(12)
+    .autoWorker(os.cpus().length)
     .printServInfo(100)
     .daemon(1234, args.worker)
 })
