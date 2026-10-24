@@ -460,6 +460,10 @@ class Resource {
       try {
         let fst = await fsp.stat(pathfile)
 
+        if (!fst.isFile()) {
+          return c.status(404).to('file not found')
+        }
+
         // 超限文件统一走流式，不缓存不压缩（无论文本/二进制）
         if (fst.size > self.maxFileSize) {
           self.cacheControl && c.setHeader('cache-control', self.cacheControl)
