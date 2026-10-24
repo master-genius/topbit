@@ -732,7 +732,7 @@ class Topbit {
    * @param {string} name 请求命名，默认为空字符串，可以不写。
    */
   map(marr, path, callback, name = '') {
-    return this.router.map(marr, name, callback, name);
+    return this.router.map(marr, path, callback, name);
   }
 
   /**
@@ -741,7 +741,7 @@ class Topbit {
    * @param {string} name 请求命名，默认为空字符串，可以不写。
    */
   any(path, callback, name = '') {
-    return this.router.any(name, callback, name);
+    return this.router.any(path, callback, name);
   }
 
   initMsgEvent() {

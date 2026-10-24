@@ -39,7 +39,7 @@ class Session {
   }
 
   init(app) {
-    let proto = app.httpServ.Content.prototype
+    let proto = app.httpServ.Context.prototype
 
     let self = this
 
@@ -86,7 +86,7 @@ class Session {
       c._sessFile = ''
 
       let sess_file = ''
-      let sessid = c.cookie[ self.sessionKey ]
+      let sessid = c.box.cookie[ self.sessionKey ]
       let sess_state
 
       if (sessid) {

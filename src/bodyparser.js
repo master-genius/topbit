@@ -403,7 +403,7 @@ class Bodyparser {
           try {
             ctx.body = JSON.parse( ctx.rawBody.toString('utf8') );
           } catch (err) {
-            return ctx.status(400).send('bad json data');
+            return ctx.status(400).to('bad json data');
           }
         } else {
           ctx.body = ctx.rawBody;
