@@ -396,8 +396,12 @@ const r = app.router;
 r.checkRoute('/api/:id')
 // { ok: true }
 
+r.checkRoute('/api\\v2')
+// { ok: false,
+//   message: "路由字符串 /api\\v2 存在非法字符，路由字符串允许 '字母 数字 - _ : * / . @'，最大长度1000",
+//   route: '/api\\v2' }
 r.checkRoute('/x/:id/*')
-// { ok: false, message: '...', route: '/x/:id/*' }
+// { ok: false, message: '/x/:id/* 参数 : 和 * 不能同时出现', route: '/x/:id/*' }
 ```
 
 When `ok` is `false`, `message` explains the problem and `route` is the normalized route string (the form in which this route would actually be registered); when the argument is not a string, `route` is the empty string.
@@ -482,8 +486,8 @@ app.use(
   })
 })
 
-// Not a valid prefix (contains '.'), so it is not prepended to the path and the framework stays silent.
-app.group('v1.0', route => {
+// 测试 does not conform to the prefix rules, so it is not used as a path prefix.
+app.group('测试', route => {
   route.get('/test', async c => {
     console.log(c.group, c.name)
     c.to('test ok')
@@ -1078,7 +1082,7 @@ Not every value above is free to take. The framework validates the type and rang
 
 ## Request Context
 
-Request context is an object encapsulating various request data. This design handles differences between HTTP/1.1 and HTTP/2 protocols and incompatibilities from Node.js evolution. For design and performance, the HTTP2 module encapsulates the request object as a stream, not the `http` module's `IncomingMessage` and `ServerResponse`.
+Request context is an object encapsulating various request data. This design handles differences between HTTP/1.1 and HTTP/2 protocols and incompatibilities from Node.js evolution. For design and performance reasons, the HTTP2 module encapsulates the request object as the stream, not the `http` module's `IncomingMessage` and `ServerResponse` (the encapsulated objects being request and response).
 
 **Request Context Properties and Description**
 
@@ -2474,7 +2478,7 @@ app.pre(j.mid())
 
 ### 10. Cookie (Cookie Parsing)
 
-Parses the Cookie request header from the frontend; the result is mounted on `ctx.box.cookie` (**not `ctx.cookie`**). With no cookie header `ctx.box.cookie` is `null`, so test for it before reading; when the same name appears twice the last value wins, and no automatic decoding is done.
+Parses the Cookie request header from the frontend; the result is mounted on `ctx.box.cookie` — **not** a top-level `cookie` property on the context. With no cookie header `ctx.box.cookie` is `null`, so test for it before reading; when the same name appears twice the last value wins, and no automatic decoding is done.
 
 ```javascript
 const Topbit = require('topbit')
@@ -2634,6 +2638,8 @@ Returned structure:
 - `list`: ordinary arguments that are not options and do not start with `-` (e.g. file names).
 - `command`: the parsed subcommand (`null` when subcommands are not enabled).
 
+> Note: in strict mode (the default) an error returns **early**, and the object returned then only has `{ ok, message, args }` — it does **not** include `errors`, `list` or `command`. Touching `ret.list[0]` on the error branch throws a TypeError, so check that these three fields exist before reading them.
+
 During parsing, **options not defined in the schema (starting with `-`) are ignored** and do not appear in `args` (e.g. `--local` in the example).
 
 If the description info for an argument is not an object, it converts to boolean type, using the argument name as `name`. See the `-x` parameter.
@@ -2650,8 +2656,8 @@ If the description info for an argument is not an object, it converts to boolean
 
 **Supported types:**
 
-- `int` or `number`: Integer type.
-- `float`: Floating-point type.
+- `int`: Integer type (parsed with `parseInt`).
+- `number` or `float`: Floating-point type (parsed with `parseFloat`). Note that `number` is **not** an integer — the old wording "int or number: integer type" was inaccurate.
 - `string`: String type.
 - `bool` or `boolean`: Boolean type.
 
@@ -2664,8 +2670,13 @@ If the description info for an argument is not an object, it converts to boolean
 | min | No | Restricts minimum value. |
 | max | No | Restricts maximum value. |
 | default | No | Default value. Applies only when the argument is **absent**; an invalid value follows strict mode (error by default; with `strict: false` the default is kept and the error is collected in `errors`). Also works for `bool` (e.g. `default: true`). |
-| match | No | Regular expression. If given, regex matching is performed. |
+| alias | No | Alias. Must be a string (e.g. `'-p'`) and is registered as the same rule. The alias must be written in the same style as the original name: if the original name carries `=`, the alias must carry it too, or it will not match. |
+| match | No | Regular expression. If given, regex matching is performed. **A RegExp instance must be passed** — a string is silently ignored. |
 | callback | No | Function. If given, passes the argument value to the function. If the return value is not undefined, it is used as the final parsed value. |
+
+> **Enum / array style options are not supported.** There is no value whitelist such as `limit`; writing one has no effect (it is silently ignored). For a whitelist use a `callback` that falls back; for a list pass one comma-separated string and split it in the `callback`.
+>
+> Two more silent behaviors: when the same flag is passed twice, **the later value overwrites the earlier one** (there is no array accumulation); and `--flag=false` on a bool type **still parses as true** (the source explicitly says `--bool=false` is not supported yet, `src/lib/npargv.js:231`) — the only way to turn a boolean item off is not to pass it.
 
 ### autoDefault (Automatic Default Values)
 
@@ -2700,6 +2711,10 @@ Rules for automatic defaults:
 - If `type` is `string`, default is an empty string.
 - If `type` is `number`, `int`, or `float`, default is the value of `min`. If no `min`, default is `0`.
 
+> ⚠ This rule has an easy-to-hit silent trap: because `autoDefault` defaults to true, **`args` still has a value when the user never passed the option** (number/int/float get `min`, or 0 without a `min`; strings get the empty string). As a result, business code like `args.port ?? engine-default-port` — "use undefined to detect an absent option" — can never be reached. To tell "not passed" apart from "passed 0", pass `{ autoDefault: false }` explicitly; then options that were not passed do not appear in `args` at all.
+
+> ⚠ The `argv` option must receive the **complete `process.argv`** (parsing always starts at index 2 internally). If the caller slices `process.argv.slice(2)` first, the first real argument is swallowed as the program path — the symptom is "the option was configured but has no effect", with no clue at all.
+
 ### First Argument as Subcommand
 
 Subcommands are defined via the **second `options` parameter** (an `@command`/`@defaultCommand` key inside the schema is ignored):
@@ -2720,7 +2735,8 @@ parseArgv(schema, {
 Subcommand rules:
 
 - If no subcommand is entered, or the first argument starts with `-`, `defaultCommand` is used (when set).
-- If a command outside the list is entered: falls back to `defaultCommand` when set, otherwise an error.
+- As soon as `commands` is given and `defaultCommand` is not set explicitly, the framework automatically takes `commands[0]` as the fallback default command. The "not in the list → error" branch therefore only happens in cases like **passing `defaultCommand: ''` explicitly**.
+- When an unknown command falls back to the default command, that word is **not consumed** — it still ends up in `list` or is taken as an argument value.
 - Error handling follows strict mode: strict (default) returns the error immediately; with `strict: false` errors are collected in `errors` and parsing continues.
 
 ### Positional Reference Arguments
@@ -2732,6 +2748,7 @@ However, the positional index differs from internal indexing:
 - Index starts at 1.
 - Index refers to argument values, excluding the command name.
 - If subcommands are enabled (`options.commands`), position 1 automatically starts after the subcommand.
+- ⚠ Positions are counted by **argv slots**, and **option names and option values occupy slots too**. The check for `$N` also happens before `--key=value` is parsed (`src/lib/npargv.js:198-209`), so with `node x.js --https abc` and a `$1` configured, `$1` receives `--https`, not `abc`. When using positional arguments, put them before the options, or collect them through `list` instead.
 
 Note: the subcommand is the first argument parsed, used for script subcommand functionality.
 
@@ -2758,6 +2775,8 @@ let {args} = npargv({
 
 TopbitLoader is the official "automatic loader" extension recommended by the Topbit framework, completely eliminating the tedious manual writing of `app.get()` and `app.use()`.
 
+There are two export names and they are **two coexisting loader implementations** (both exported at `topbit.js:1349-1350`), not a new-vs-old version relationship: `Topbit.Loader` (alias `Topbit.TopbitLoader`, `src/loader/loadernext.js`) is the recommended implementation; `Topbit.ClassicLoader` (`src/loader/loader.js`) is a separate, independent implementation. Their configuration options are not interchangeable — `deep`/`subgroup`/`multi`/`fileAsGroup` only take effect in `ClassicLoader`; passing them to `Loader` is silently ignored.
+
 It implements a true **MCM Pattern** (Middleware → Controller → Model), similar to MVC but lighter and more aligned with Topbit's extreme performance philosophy.
 
 [🌐 View Detailed Documentation ☛](./docs/en/topbit-loader.md)
@@ -2768,11 +2787,14 @@ It implements a true **MCM Pattern** (Middleware → Controller → Model), simi
 
 TopbitToken is a zero-dependency, minimalist, high-security encrypted user credential (Token) system built specifically for the Topbit framework.
 
-It is implemented entirely based on Node.js native `crypto`, supporting:
+It is implemented entirely based on Node.js native `crypto`. Supported algorithms (the `alg/algorithm` whitelist in `src/token/token.js`, case-insensitive):
 
-- AES-256-GCM (Default, Recommended)
-- AES-192-GCM / AES-128-CBC / AES-256-CBC
-- SM4-CBC (National Standard)
+- AES-256-GCM (default, recommended)
+- AES-192-GCM
+- AES-128-CBC / AES-192-CBC / AES-256-CBC
+- SM4-CBC (national standard; `sm4` is an alias that normalizes to `sm4-cbc`)
+
+GCM and CBC use different IV lengths: a non-GCM algorithm resets `iv` to a 16-byte random string (`ivLength=16`), so a custom `iv` only means something for the GCM family.
 
 [🌐 View Detailed Documentation ☛](./docs/en/topbit-token.md)
 
