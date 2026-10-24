@@ -7,7 +7,9 @@ let {args} = npargv({
   '--loadtype': {
     name: 'loadtype',
     default: 'text',
-    limit: ['text', 'obj', 'orgobj']
+    callback: (v) => {
+        return ['text', 'obj', 'orgobj'].includes(v) ? v : 'text'
+    }
   },
   '--load': {
     name: 'load',
