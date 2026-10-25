@@ -44,6 +44,21 @@ function connectionTokens(value) {
   return tokens
 }
 
+// 配置里的头名统一转小写：h2 要求小写，h1 不区分大小写；否则 'X-Foo' 与客户端的
+// 'x-foo' 在 h2 发送时会被当成同名头合并（"client, cfg"），而不是覆盖。
+// h1 后端没有 :authority 伪头，写成 :authority 的配置等价于 host
+function normalizeConfigHeaders(src, isReq) {
+  const out = {}
+
+  for (const h in src) {
+    let k = h.toLowerCase()
+    if (isReq && k === ':authority') k = 'host'
+    out[k] = src[h]
+  }
+
+  return out
+}
+
 function cleanHeadersForHttp1(headers) {
   const h1Headers = Object.create(null)
   const extraHop = connectionTokens(headers.connection)
@@ -557,14 +572,12 @@ class Proxy {
         }
 
         if (tmp.headers !== undefined) {
-          for (let h in tmp.headers) {
-            backend_obj.headers[h] = tmp.headers[h]
-          }
+          backend_obj.headers = normalizeConfigHeaders(tmp.headers, true)
         }
 
         if (tmp.resHeaders !== undefined) {
           if (typeof tmp.resHeaders === 'object' && !Array.isArray(tmp.resHeaders)) {
-            backend_obj.resHeaders = tmp.resHeaders
+            backend_obj.resHeaders = normalizeConfigHeaders(tmp.resHeaders, false)
           } else {
             console.error(
               `${k} ${tmp.url} ${tmp.path}：resHeaders属性要求是object类型，使用key-value形式提供。`

@@ -2252,8 +2252,8 @@ pxy.init(app)
 | `timeout` | 继承实例 | 单次请求超时 |
 | `requestTimeout` | 继承实例 | 传输总时长上限 |
 | `maxBody` | 继承实例 | 请求体上限 |
-| `headers` | `{}` | 转发时附加的请求头，同名时覆盖客户端的 |
-| `resHeaders` | `null` | 附加到响应上的头 |
+| `headers` | `{}` | 转发时附加的请求头，同名时覆盖客户端的。头名解析时统一转小写；`host` 与 `:authority` 等价，按后端协议自动落到对应的头（h1 后端为 `host`，h2 后端为 `:authority`） |
+| `resHeaders` | `null` | 附加到响应上的头，头名同样统一转小写 |
 | `resHeadersCallback` | `null` | 函数，自定义处理后端响应头 |
 | `rewrite` | `null` | 函数 `(ctx, path)`，返回改写后的路径，返回空值表示不改写 |
 | `aliveCheckPath` | `'/'` | 存活检测请求的路径 |

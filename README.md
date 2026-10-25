@@ -2211,8 +2211,8 @@ pxy.init(app)
 | `timeout` | inherits instance | Per-request timeout |
 | `requestTimeout` | inherits instance | Overall transfer time limit |
 | `maxBody` | inherits instance | Request body limit |
-| `headers` | `{}` | Extra request headers when forwarding; overrides the client's on conflict |
-| `resHeaders` | `null` | Extra headers added to the response |
+| `headers` | `{}` | Extra request headers when forwarding; overrides the client's on conflict. Names are lower-cased at parse time; `host` and `:authority` are equivalent and map to the header matching the backend protocol (`host` for h1 backends, `:authority` for h2 backends) |
+| `resHeaders` | `null` | Extra headers added to the response; names are lower-cased as well |
 | `resHeadersCallback` | `null` | Function to post-process backend response headers |
 | `rewrite` | `null` | Function `(ctx, path)` returning the rewritten path; a falsy return means no rewrite |
 | `aliveCheckPath` | `'/'` | Path used by the alive check request |

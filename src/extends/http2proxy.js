@@ -17,6 +17,21 @@ const HOP_BY_HOP_HEADERS = {
   'proxy-connection': true // 非标准但广泛存在的事实逐跳头
 }
 
+// 配置里的头名统一转小写：h2 要求小写；否则 'X-Foo' 与客户端的 'x-foo'
+// 会被当成同名头合并（"client, cfg"），而不是覆盖。
+// h2 后端的目标主机是 :authority 伪头，写成 host 的配置等价于 :authority
+function normalizeConfigHeaders(src, isReq) {
+  const out = {}
+
+  for (const h in src) {
+    let k = h.toLowerCase()
+    if (isReq && k === 'host') k = ':authority'
+    out[k] = src[h]
+  }
+
+  return out
+}
+
 // 解析 Connection 头列出的额外逐跳头。
 // RFC 7230 §6.1：Connection 值中的每个 token 所指的头同样属于逐跳头。
 // 值可能为字符串或数组（多同名头合并），统一处理。
@@ -397,16 +412,11 @@ Http2Proxy.prototype.checkConfig = function (tmp, k) {
 
 Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
   if (tmp.headers && tmp.headers.toString() === '[object Object]') {
-    backend_obj.headers = {}
-
-    for (let h in tmp.headers) {
-      backend_obj.headers[h] = tmp.headers[h]
-    }
-
+    backend_obj.headers = normalizeConfigHeaders(tmp.headers, true)
   }
 
   if (tmp.resHeaders && typeof tmp.resHeaders === 'object' && !Array.isArray(tmp.resHeaders)) {
-    backend_obj.resHeaders = tmp.resHeaders
+    backend_obj.resHeaders = normalizeConfigHeaders(tmp.resHeaders, false)
   }
 
   // 解析时判定类型，非函数置 null，运行时直接条件判断
@@ -635,7 +645,8 @@ Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
         break
 
       case 'host':
-        http2_headers[':authority'] = headers[k]
+        // 配置里显式给出的 :authority 优先于入站 host，不依赖键的遍历顺序
+        if (headers[':authority'] === undefined) http2_headers[':authority'] = headers[k]
         break
 
       default:
