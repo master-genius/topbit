@@ -354,6 +354,89 @@ async function testPositiveMinConnectUnchanged() {
   console.log('  ✓ 回归：minConnect>0 时失败标记不受 failWindow 影响')
 }
 
+// 前置一层「延迟转发」的 TCP 代理，让 TLS 握手（也就是 session 的 connect 事件）慢 delay 毫秒
+async function slowTlsBackend(delay) {
+  const fs = require('node:fs')
+  const net = require('node:net')
+  const dir = require('node:path').join(__dirname, '../demo/cert/')
+
+  const up = http2.createSecureServer({
+    key: fs.readFileSync(dir + 'x.com.key'),
+    cert: fs.readFileSync(dir + 'x.com.cert')
+  })
+  up.on('stream', stream => { stream.respond({ ':status': 200 }); stream.end('x') })
+  await new Promise(rv => up.listen(0, '127.0.0.1', rv))
+
+  const front = net.createServer(sock => {
+    sock.pause()
+    sock.on('error', () => {})
+    setTimeout(() => {
+      // 用例结束后上游已关闭，迟到的连接直接丢弃
+      if (!up.listening) return sock.destroy()
+      const u = net.connect(up.address().port, '127.0.0.1')
+      u.on('error', () => {})
+      sock.pipe(u).pipe(sock)
+      sock.resume()
+    }, delay)
+  })
+  await new Promise(rv => front.listen(0, '127.0.0.1', rv))
+
+  return {
+    port: front.address().port,
+    close() { front.close(); up.close() }
+  }
+}
+
+// ---------- 用例9：握手超时后连接才成功，不得泄漏并发配额 ----------
+// 回归点：超时只放弃当次请求，连接留在池里；其 onConnect 不得再为已拒绝的 Promise 预占配额，
+// 否则 aliveStreams 残留为 1，空闲回收条件不再满足，minConnect<=0 的连接被永久保活。
+async function testLateConnectNoSlotLeak() {
+  for (const mc of [0, 2]) {
+    for (const withWaiter of [false, true]) {
+      const be = await slowTlsBackend(600)
+      const pool = new Http2Pool({
+        url: `https://127.0.0.1:${be.port}`,
+        minConnect: mc,
+        connectTimeout: 250,   // 小于握手耗时 600ms，必然超时
+        queueTimeout: 3000,
+        timeout: 1500          // 须大于握手耗时，否则连接会在握手中途被空闲逻辑关掉
+      })
+      const label = `minConnect=${mc} ${withWaiter ? '超时期间有排队请求' : '单个请求'}`
+
+      const r1 = simpleGet(pool).then(() => 'ok', e => e.message)
+      let r2 = null
+      if (withWaiter) {
+        await sleep(50)
+        r2 = simpleGet(pool).then(() => 'ok', e => e.message)
+      }
+
+      assert.strictEqual(await r1, 'Connection timeout', `${label}：首个请求应握手超时`)
+      if (r2) assert.strictEqual(await r2, 'ok', `${label}：排队请求应在连接建好后被服务`)
+
+      await sleep(700)  // 越过握手完成时刻（约 600ms）
+      assert.ok(pool.sessions.length >= 1, `${label}：超时的连接应保留在池里`)
+      assert.ok(pool.sessions.every(w => w.aliveStreams === 0),
+        `${label}：握手完成后不得残留并发配额，实际 ${pool.sessions.map(w => w.aliveStreams)}`)
+
+      await simpleGet(pool)  // 保留下来的连接可用
+      assert.ok(pool.sessions.every(w => w.aliveStreams === 0), `${label}：请求结束后配额应归零`)
+
+      if (mc <= 0) {
+        await sleep(2500)  // 越过空闲回收阈值 1500ms
+        assert.strictEqual(pool.sessions.length, 0, `${label}：空闲后应被回收，不得被永久保活`)
+      } else {
+        await sleep(300)
+        assert.ok(pool.sessions.length >= 1, `${label}：常驻连接不得因此被回收`)
+        assert.ok(pool.sessions.every(w => w.aliveStreams === 0), `${label}：常驻连接配额应为 0`)
+      }
+
+      pool.sessions.slice().forEach(w => w.session.destroy())
+      be.close()
+    }
+  }
+  console.log('  ✓ 握手超时后才连上：配额不泄漏，minConnect<=0 可回收、>0 保持常驻')
+}
+
 ;(async () => {
   console.log('Http2Pool 回归测试')
   await testGoawayDrain()
@@ -364,6 +447,7 @@ async function testPositiveMinConnectUnchanged() {
   await testColdStartNoFanout()
   await testZeroMinConnectFailWindow()
   await testPositiveMinConnectUnchanged()
+  await testLateConnectNoSlotLeak()
   console.log('全部通过')
   process.exit(0)
 })().catch(err => {

@@ -392,22 +392,40 @@ class Http2Pool {
         if (newWrapper) {
             // 等待连接建立（上限为配置的 connectTimeout）
             return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => {
-                     reject(new Error('Connection timeout'))
-                }, this.connectTimeout)
-                
-                const onConnect = () => {
+                // 本次等待一旦结束（成功/出错/超时），必须摘掉自己挂在 session 上的监听器。
+                // 否则超时后连接才握手成功时，onConnect 仍会触发：它会为一个早已被拒绝的
+                // Promise 预占并发配额，而这个配额永远没人归还——aliveStreams 残留为 1，
+                // 空闲回收条件（aliveStreams <= 0）从此不再满足，连接被永久保活。
+                // 超时只放弃这一次请求，连接本身保留在池里，可继续服务后来的请求与等待者
+                // （由 _createConnection 里池自己的 connect 监听分发配额）。
+                const session = newWrapper.session
+                let timer = null
+
+                const detach = () => {
                     clearTimeout(timer)
-                    newWrapper.session.removeListener('connect', onConnect)
+                    session.removeListener('connect', onConnect)
+                    session.removeListener('error', onError)
+                }
+
+                const onConnect = () => {
+                    detach()
                     // 建连期间配额可能已被等待队列抢占，抢不到就转入队列
                     if (this._acquire(newWrapper)) resolve(newWrapper)
                     else resolve(this._waitForSlot())
                 }
-                newWrapper.session.once('connect', onConnect)
-                newWrapper.session.once('error', (err) => {
-                    clearTimeout(timer)
+
+                const onError = (err) => {
+                    detach()
                     reject(err)
-                })
+                }
+
+                timer = setTimeout(() => {
+                    detach()
+                    reject(new Error('Connection timeout'))
+                }, this.connectTimeout)
+
+                session.once('connect', onConnect)
+                session.once('error', onError)
             })
         }
     }
