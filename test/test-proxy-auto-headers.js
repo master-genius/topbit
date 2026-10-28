@@ -17,6 +17,9 @@ const http2 = require('node:http2')
 
 const { Proxy, ProxyNoAgent, Http2Proxy } = Topbit.extensions
 
+// 端口固定在 28950–28951（后端）与 28960–28974（应用）：位于系统临时端口范围（32768+）之外，
+// 且不与其他测试文件重叠
+
 let pass = 0, fail = 0
 function check(name, cond, extra = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' ' + extra : ''}`)
@@ -53,7 +56,7 @@ function call(port, host, extra = {}) {
 const FORGED = { 'x-real-host': 'evil.test', 'x-real-proto': 'https', 'x-real-ip': '9.9.9.9' }
 const CFG_HEADERS = { 'x-real-host': 'cfg.example', 'x-real-proto': 'cfg-proto', 'x-real-ip': 'cfg-ip' }
 
-let nextPort = 39960
+let nextPort = 28960
 function startApp(pxy) {
   const port = nextPort++
   const app = new Topbit({ debug: false })
@@ -71,13 +74,13 @@ function withCapturedErrors(fn) {
 }
 
 ;(async () => {
-  await new Promise(rv => h1backend.listen(39950, '127.0.0.1', rv))
-  await new Promise(rv => h2backend.listen(39951, '127.0.0.1', rv))
+  await new Promise(rv => h1backend.listen(28950, '127.0.0.1', rv))
+  await new Promise(rv => h2backend.listen(28951, '127.0.0.1', rv))
 
   const classes = [
-    ['Proxy', Proxy, 'http://127.0.0.1:39950'],
-    ['ProxyNoAgent', ProxyNoAgent, 'http://127.0.0.1:39950'],
-    ['Http2Proxy', Http2Proxy, 'http://127.0.0.1:39951']
+    ['Proxy', Proxy, 'http://127.0.0.1:28950'],
+    ['ProxyNoAgent', ProxyNoAgent, 'http://127.0.0.1:28950'],
+    ['Http2Proxy', Http2Proxy, 'http://127.0.0.1:28951']
   ]
 
   for (const [name, Cls, url] of classes) {

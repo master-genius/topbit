@@ -15,6 +15,8 @@ const http2 = require('node:http2')
 
 const { Http2Proxy } = Topbit.extensions
 
+// 端口固定在 28930–28939：位于系统临时端口范围（32768+）之外，且不与其他测试文件重叠
+
 let pass = 0, fail = 0
 function check(name, cond, extra = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' ' + extra : ''}`)
@@ -91,7 +93,7 @@ function captureErrors() {
   // ---------- 1. 全局 minConnect:0 ----------
   {
     const cap = captureErrors()
-    const s = await setup(39901, 39900, { minConnect: 0 }, {})
+    const s = await setup(28931, 28930, { minConnect: 0 }, {})
     await sleep(900)  // 超过「未知选项」告警的 500ms 延迟
     cap.restore()
 
@@ -99,7 +101,7 @@ function captureErrors() {
     check('1.2 minConnect 不触发「未知选项」', !cap.msgs.some(m => m.includes('未知选项')),
           cap.msgs.join('|').slice(0, 80))
 
-    const r = await request(39900, 'mc.test')
+    const r = await request(28930, 'mc.test')
     check('1.3 首个请求成功', r.code === 200 && r.body === 'ok', `实际 ${r.code} ${r.body.slice(0, 40)}`)
     check('1.4 首个请求才建连', s.st.total === 1, `累计 ${s.st.total}`)
 
@@ -107,7 +109,7 @@ function captureErrors() {
     check('1.5 空闲回收后连接归零', s.st.active === 0, `存活 ${s.st.active}`)
     check('1.6 回收后不补连', s.st.total === 1, `累计 ${s.st.total}`)
 
-    const r2 = await request(39900, 'mc.test')
+    const r2 = await request(28930, 'mc.test')
     check('1.7 回收后再次请求成功', r2.code === 200, `实际 ${r2.code}`)
     check('1.8 再次请求按需重建', s.st.total === 2, `累计 ${s.st.total}`)
 
@@ -116,11 +118,11 @@ function captureErrors() {
 
   // ---------- 2. 后端级 minConnect:-3（<=0 等价于 0） ----------
   {
-    const s = await setup(39903, 39902, {}, { minConnect: -3 })
+    const s = await setup(28933, 28932, {}, { minConnect: -3 })
     await sleep(900)
     check('2.1 后端级 -3：启动期零连接', s.st.total === 0, `累计 ${s.st.total}`)
 
-    const r = await request(39902, 'mc.test')
+    const r = await request(28932, 'mc.test')
     check('2.2 后端级 -3：首个请求成功', r.code === 200, `实际 ${r.code}`)
     check('2.3 后端级 -3：按需建连', s.st.total === 1, `累计 ${s.st.total}`)
 
@@ -129,7 +131,7 @@ function captureErrors() {
 
   // ---------- 2b. 后端级覆盖实例级：实例 0，后端 3 → 后端走预热 ----------
   {
-    const s = await setup(39905, 39904, { minConnect: 0 }, { minConnect: 3 })
+    const s = await setup(28935, 28934, { minConnect: 0 }, { minConnect: 3 })
     await sleep(900)
     check('2b 后端级 3 覆盖实例级 0：启动预热', s.st.total >= 2, `累计 ${s.st.total}`)
     s.srv.close()
@@ -137,11 +139,11 @@ function captureErrors() {
 
   // ---------- 3. 不传 minConnect：原行为（预热） ----------
   {
-    const s = await setup(39907, 39906, {}, {})
+    const s = await setup(28937, 28936, {}, {})
     await sleep(900)
     check('3.1 默认：启动期预热建连', s.st.total >= 2, `累计 ${s.st.total}`)
 
-    const r = await request(39906, 'mc.test')
+    const r = await request(28936, 'mc.test')
     check('3.2 默认：请求成功', r.code === 200, `实际 ${r.code}`)
 
     s.srv.close()
@@ -150,7 +152,7 @@ function captureErrors() {
   // ---------- 4. 非法值 ----------
   {
     const cap = captureErrors()
-    const s = await setup(39909, 39908, { minConnect: 'abc' }, { minConnect: NaN })
+    const s = await setup(28939, 28938, { minConnect: 'abc' }, { minConnect: NaN })
     await sleep(900)
     cap.restore()
 

@@ -15,6 +15,8 @@ const net = require('node:net')
 
 const { Http2Proxy } = Topbit.extensions
 
+// 应用端口固定在 28940–28942：位于系统临时端口范围（32768+）之外，且不与其他测试文件重叠
+
 let pass = 0, fail = 0
 function check(name, cond, extra = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' ' + extra : ''}`)
@@ -134,15 +136,15 @@ async function coldStart(aport, proxyOpts, backendCfg) {
 
   // ---------- 2. 功能：冷启动慢握手并发 ----------
   {
-    const codes = await coldStart(39920, {}, {})
+    const codes = await coldStart(28940, {}, {})
     check('2.1 默认 3s：排队请求超时 503', codes.includes(503) && codes.includes(200), `实际 ${codes}`)
   }
   {
-    const codes = await coldStart(39921, { queueTimeout: 8000 }, {})
+    const codes = await coldStart(28941, { queueTimeout: 8000 }, {})
     check('2.2 实例级 8s：并发请求全部成功', codes.every(c => c === 200), `实际 ${codes}`)
   }
   {
-    const codes = await coldStart(39922, {}, { queueTimeout: 8000 })
+    const codes = await coldStart(28942, {}, { queueTimeout: 8000 })
     check('2.3 后端级 8s（实例默认）：并发请求全部成功', codes.every(c => c === 200), `实际 ${codes}`)
   }
 
