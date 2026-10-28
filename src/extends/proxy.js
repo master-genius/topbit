@@ -151,17 +151,8 @@ class Proxy {
 
     this.methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD', 'PATCH', 'TRACE']
 
+    // addIP 为 true 时，客户端 IP 写入这个请求头
     this.realIPHeader = 'x-real-ip'
-
-    /**
-     * 与 x-real-ip 同族的两个头：让后端知道客户端最初请求的 host 与协议。
-     * 后端据此生成绝对 URL、判断是否该发 https 重定向、决定 Secure cookie。
-     * key 可自定义，取值由代理无条件写入（不接受客户端传入的同名头，
-     * 否则可被伪造），这与 addIP 为 false 时 x-real-ip 的行为一致。
-     */
-    this.realHostHeader = 'x-real-host'
-
-    this.realProtoHeader = 'x-real-proto'
 
     // 查表 key 直接来自 Host 头（外部可控），用无原型对象避免取到 constructor 等原型属性。
     // 内层以 routepath 为 key，必然以 / 开头，本无此风险，一并统一形态。
@@ -197,6 +188,8 @@ class Proxy {
     // 代理传输总时长上限（毫秒），0 表示不限制；响应头到达后开始计时
     this.requestTimeout = 600000
 
+    // 是否向后端写入客户端 IP（头名见 realIPHeader）。默认 false：不写入，
+    // 客户端带来的同名头也原样透传；true：写入，已有值则追加成逗号链。
     this.addIP = false
 
     this.debug = false
@@ -292,15 +285,6 @@ class Proxy {
       switch (k) {
         case 'realIPHeader':
           this.realIPHeader = options[k]
-          break
-
-        case 'realHostHeader':
-        case 'realProtoHeader':
-          if (typeof options[k] === 'string' && options[k].length > 0) {
-            this[k] = options[k].toLowerCase()
-          } else {
-            console.error(`${k} 必须是非空字符串: ${options[k]}`)
-          }
           break
 
         case 'config':
@@ -799,6 +783,13 @@ class Proxy {
       urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
 
+      // 客户端 IP：默认不写入；addIP 为 true 时写入，已有值则追加成逗号链。
+      // 放在配置头之前，配置里的同名头随后可以覆盖
+      if (self.addIP) {
+        if (urlobj.headers[self.realIPHeader]) urlobj.headers[self.realIPHeader] += `,${c.ip}`
+        else urlobj.headers[self.realIPHeader] = c.ip
+      }
+
       // 合并配置的自定义请求头（配置覆盖客户端同名头）
       for (let k in pr.headers) {
         urlobj.headers[k] = pr.headers[k]
@@ -806,20 +797,6 @@ class Proxy {
 
       // 挂载后端独立 Agent，复用连接池
       urlobj.agent = pr.agent
-
-      if (self.addIP && urlobj.headers[self.realIPHeader]) {
-        urlobj.headers[self.realIPHeader] += `,${c.ip}`
-      } else {
-        urlobj.headers[self.realIPHeader] = c.ip
-      }
-
-      /**
-       * 客户端最初请求的 host 与协议。无条件覆盖：这两个值描述的是"客户端与
-       * 本代理之间"这一跳的事实，由本代理独家知道，接受客户端传入的同名头
-       * 等于允许伪造（后端据此判断是否已走 https，被伪造会导致安全降级）。
-       */
-      urlobj.headers[self.realHostHeader]  = c.host
-      urlobj.headers[self.realProtoHeader] = c.protocol
 
       let hci = urlobj.protocol == 'https:' ? https : http
 

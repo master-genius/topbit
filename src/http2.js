@@ -46,7 +46,7 @@ class Httpt {
     //协议取自服务端自身：h2走createSecureServer还是createServer完全由config.https决定，
     //与http1.js的取法一致。不能用headers[':scheme']——伪头由客户端提供，Node不校验它
     //与实际传输是否相符（明文h2c上发:scheme: https会被原样收下），拿它当"客户端是否
-    //已走https"会让代理转发的x-real-proto可被伪造。
+    //已走https"会让依赖ctx.protocol的判断（如Secure cookie、https重定向）可被伪造。
     let protocol = self.config.https ? 'https' : 'http';
 
     let callback = (stream, headers) => {

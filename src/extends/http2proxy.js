@@ -221,17 +221,8 @@ let Http2Proxy = function (options = {}) {
 
   this.maxBody = 50000000
 
+  // addIP 为 true 时，客户端 IP 写入这个请求头
   this.realIPHeader = 'x-real-ip'
-
-  /**
-   * 与 x-real-ip 同族的两个头：让后端知道客户端最初请求的 host 与协议。
-   * 后端据此生成绝对 URL、判断是否该发 https 重定向、决定 Secure cookie。
-   * key 可自定义，取值由代理无条件写入（不接受客户端传入的同名头，
-   * 否则可被伪造），这与 addIP 为 false 时 x-real-ip 的行为一致。
-   */
-  this.realHostHeader = 'x-real-host'
-
-  this.realProtoHeader = 'x-real-proto'
 
   //是否启用全代理模式。
   this.full = false
@@ -252,6 +243,8 @@ let Http2Proxy = function (options = {}) {
   // 冷启动（minConnect<=0 空闲回收后）并发请求会排队等握手完成，握手慢时需调大。
   this.queueTimeout = 3000
 
+  // 是否向后端写入客户端 IP（头名见 realIPHeader）。默认 false：不写入，
+  // 客户端带来的同名头也原样透传；true：写入，已有值则追加成逗号链。
   this.addIP = false
 
   this.debug = false
@@ -281,15 +274,6 @@ let Http2Proxy = function (options = {}) {
     switch (k) {
       case 'realIPHeader':
         this.realIPHeader = options[k]
-        break
-
-      case 'realHostHeader':
-      case 'realProtoHeader':
-        if (typeof options[k] === 'string' && options[k].length > 0) {
-          this[k] = options[k].toLowerCase()
-        } else {
-          console.error(`${k} 必须是非空字符串: ${options[k]}`)
-        }
         break
 
       case 'config':
@@ -756,19 +740,12 @@ Http2Proxy.prototype.mid = function () {
     let pr = self.getBackend(c, host)
     if (!pr) return c.status(503).to(error_503_text)
 
-    if (self.addIP && c.headers[self.realIPHeader]) {
-      c.headers[self.realIPHeader] += `,${c.ip}`
-    } else {
-      c.headers[self.realIPHeader] = c.ip
+    // 客户端 IP：默认不写入；addIP 为 true 时写入，已有值则追加成逗号链。
+    // 配置里的同名头随后覆盖（见下方 pr.headers）
+    if (self.addIP) {
+      if (c.headers[self.realIPHeader]) c.headers[self.realIPHeader] += `,${c.ip}`
+      else c.headers[self.realIPHeader] = c.ip
     }
-
-    /**
-     * 客户端最初请求的 host 与协议。无条件覆盖：这两个值描述的是"客户端与
-     * 本代理之间"这一跳的事实，由本代理独家知道，接受客户端传入的同名头
-     * 等于允许伪造（后端据此判断是否已走 https，被伪造会导致安全降级）。
-     */
-    c.headers[self.realHostHeader]  = c.host
-    c.headers[self.realProtoHeader] = c.protocol
 
     let hii = pr.h2Pool
 

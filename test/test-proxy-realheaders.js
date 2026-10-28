@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * 代理：x-real-host / x-real-proto 与存活检测的启停接口
+ * 代理：不自动注入 x-real-* 请求头，与存活检测的启停接口
  *
- * 1) 与 x-real-ip 同族的两个头：让后端知道客户端最初请求的 host 与协议。
- *    后端据此生成绝对 URL、判断是否该发 https 重定向、决定 Secure cookie。
- *    key 可自定义；取值由代理无条件覆盖，不接受客户端传入的同名头。
+ * 1) 代理不再自动写入 x-real-host / x-real-proto，addIP 默认关闭时也不写 x-real-ip；
+ *    客户端带来的同名头原样透传。需要时由用户在后端配置的 headers 里自定义，
+ *    或开启 addIP 写入客户端 IP。（三种代理的完整矩阵见 test-proxy-auto-headers.js）
  *
  * 2) startAliveCheck() / stopAliveCheck()：server.close() 只停止 accept，
  *    存活检测的 setInterval 仍在跑会让老实例无法回收并持续探测后端。
@@ -71,12 +71,11 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   px2.init(app2);
   app2.run(P.tls);
 
-  //---------- 自定义 key ----------
+  //---------- addIP:true ----------
   const app3 = new Topbit({parseBody: false});
   const px3 = new Proxy({
     port: P.custom,
-    realHostHeader: 'X-Gw-Host',
-    realProtoHeader: 'X-Gw-Proto',
+    addIP: true,
     config: hostCfg(`c.test:${P.custom}`)
   });
   px3.init(app3);
@@ -84,33 +83,31 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
 
   await new Promise(r => setTimeout(r, 500));
 
-  //---- 默认 key ----
+  //---- 默认：不再自动注入 ----
   let h = await get(P.plain, {host: `a.test:${P.plain}`});
-  check('默认写入 x-real-host', h['x-real-host'] === `a.test:${P.plain}`, h['x-real-host']);
-  check('明文下 x-real-proto 为 http', h['x-real-proto'] === 'http', h['x-real-proto']);
-  check('x-real-ip 仍照常写入', typeof h['x-real-ip'] === 'string', h['x-real-ip']);
+  check('默认不注入 x-real-host', h['x-real-host'] === undefined, String(h['x-real-host']));
+  check('默认不注入 x-real-proto', h['x-real-proto'] === undefined, String(h['x-real-proto']));
+  check('默认不写 x-real-ip（addIP 关闭）', h['x-real-ip'] === undefined, String(h['x-real-ip']));
 
-  //---- TLS 下 proto 必须是 https ----
+  //---- TLS 下同样不注入 ----
   let h2 = await get(P.tls, {host: `b.test:${P.tls}`}, true);
-  check('TLS 下 x-real-proto 为 https', h2['x-real-proto'] === 'https', h2['x-real-proto']);
-  check('TLS 下 x-real-host 正确', h2['x-real-host'] === `b.test:${P.tls}`, h2['x-real-host']);
+  check('TLS 下不注入 x-real-proto', h2['x-real-proto'] === undefined, String(h2['x-real-proto']));
+  check('TLS 下不注入 x-real-host', h2['x-real-host'] === undefined, String(h2['x-real-host']));
 
-  //---- 伪造必须被覆盖 ----
+  //---- 客户端带来的头原样透传，不屏蔽 ----
   let h3 = await get(P.plain, {
     host: `a.test:${P.plain}`,
     'x-real-proto': 'https',
     'x-real-host': 'evil.test'
   });
-  check('客户端伪造的 x-real-proto 被覆盖', h3['x-real-proto'] === 'http', h3['x-real-proto']);
-  check('客户端伪造的 x-real-host 被覆盖',
-        h3['x-real-host'] === `a.test:${P.plain}`, h3['x-real-host']);
+  check('客户端的 x-real-proto 原样透传', h3['x-real-proto'] === 'https', h3['x-real-proto']);
+  check('客户端的 x-real-host 原样透传', h3['x-real-host'] === 'evil.test', h3['x-real-host']);
 
-  //---- 自定义 key ----
+  //---- addIP:true 才写入 x-real-ip ----
   let h4 = await get(P.custom, {host: `c.test:${P.custom}`});
-  check('自定义 key 生效（x-gw-host）', h4['x-gw-host'] === `c.test:${P.custom}`, h4['x-gw-host']);
-  check('自定义 key 生效（x-gw-proto）', h4['x-gw-proto'] === 'http', h4['x-gw-proto']);
-  check('自定义 key 后不再写默认 key', h4['x-real-host'] === undefined,
-        String(h4['x-real-host']));
+  check('addIP:true 写入 x-real-ip',
+        typeof h4['x-real-ip'] === 'string' && h4['x-real-ip'].includes('127.0.0.1'), h4['x-real-ip']);
+  check('addIP:true 也不注入 x-real-host', h4['x-real-host'] === undefined, String(h4['x-real-host']));
 
   //---------- 存活检测启停 ----------
   const countTimers = (px) => {

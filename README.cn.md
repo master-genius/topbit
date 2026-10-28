@@ -2096,6 +2096,23 @@ config: {
 
 配置是按用户访问的 host 分组的，所以每组写一个静态值即可。客户端请求自带的请求头会原样转发，配置里的同名 `headers` 会覆盖它，这是通用规则，对所有头一视同仁。
 
+**自动注入的请求头：**
+
+代理**不会**自动添加 `x-real-host`、`x-real-proto`，默认也不写 `x-real-ip`（见 `addIP`）。通用规则只有两条：客户端带来的头原样转发，不屏蔽；后端配置里的 `headers` 同名时覆盖。需要让后端知道原始域名或协议时，自己在配置里设置：
+
+```javascript
+config: {
+    'xyz.com': [
+        {
+            url : 'http://ioo.com',
+            headers : { 'x-real-host' : 'xyz.com', 'x-real-proto' : 'https' }
+        }
+    ]
+}
+```
+
+> 注意：客户端自己带来的 `x-real-host` / `x-real-proto` / `x-real-ip` 不会被屏蔽。后端若信任这些头，需要在配置里写同名头覆盖，或由前置的可信代理清除。
+
 > 注意：nginx 默认还会配合 `proxy_redirect default` 把后端响应里的绝对 `Location` 改回代理地址，这里**没有**这类响应头改写。后端返回带自己域名的绝对地址时，用户会被带到后端域名，需要后端自行处理，或用 `resHeaders` / `resHeadersCallback` 调整。
 
 **路径匹配与跨 host 降级：**
@@ -2252,10 +2269,8 @@ pxy.init(app)
 | `maxBody` | `50000000` | 请求体上限（字节），见上文 |
 | `methods` | `['GET','POST','PUT','DELETE','OPTIONS','HEAD','PATCH','TRACE']` | 注册路由时使用的请求方法集合 |
 | `full` | `false` | 全代理模式：未命中时直接返回 502，而不是 `next()` 交还中间件链。配置了 `defaultServer` 时以回退优先 |
-| `addIP` | `false` | 为 `true` 时把客户端 IP **追加**到已有的真实 IP 头（形成逗号分隔链），否则直接覆盖 |
-| `realIPHeader` | `'x-real-ip'` | 携带客户端 IP 的请求头名称 |
-| `realHostHeader` | `'x-real-host'` | 携带客户端最初请求 Host 的请求头名称 |
-| `realProtoHeader` | `'x-real-proto'` | 携带客户端最初请求协议（`http` / `https`）的请求头名称 |
+| `addIP` | `false` | 是否向后端写入客户端 IP。默认**不写入**，客户端带来的同名头也原样透传；为 `true` 时写入，已有值则**追加**成逗号分隔链。写入发生在应用后端配置 `headers` 之前，所以配置里的同名头可以覆盖 |
+| `realIPHeader` | `'x-real-ip'` | `addIP` 为 `true` 时携带客户端 IP 的请求头名称 |
 | `balancer` | `null` | 自定义负载均衡器，需提供 `select(c, prlist, pxybalance)` 方法。框架内置 `Topbit.ProxyBalancer`（基于标识的一致性哈希） |
 | `connectOptions` | `{family: 4}` | 传给底层请求的连接选项，可被后端配置项 `connectOptions` 逐项覆盖 |
 | `maxSockets` | `1000` | 每个后端 Agent 的最大连接数 |

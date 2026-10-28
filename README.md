@@ -2055,6 +2055,23 @@ config: {
 
 Configuration is grouped by the host the user visited, so one static value per group is enough. Headers sent by the client are forwarded as-is, and a configured `headers` entry of the same name overrides them — a general rule that applies to every header alike.
 
+**Automatically injected headers:**
+
+The proxy does **not** add `x-real-host` or `x-real-proto`, and does not write `x-real-ip` by default (see `addIP`). There are just two general rules: headers sent by the client are forwarded as-is, never filtered; and a same-named entry in the backend's configured `headers` overrides them. To let the backend know the original domain or protocol, set them yourself in the config:
+
+```javascript
+config: {
+    'xyz.com': [
+        {
+            url : 'http://ioo.com',
+            headers : { 'x-real-host' : 'xyz.com', 'x-real-proto' : 'https' }
+        }
+    ]
+}
+```
+
+> Note: `x-real-host` / `x-real-proto` / `x-real-ip` sent by the client itself are not filtered. A backend that trusts them should override them with a same-named header in the config, or have a trusted proxy in front strip them.
+
 > Note: nginx by default also pairs this with `proxy_redirect default`, which rewrites absolute `Location` values in backend responses back to the proxy's address. There is **no** such response-header rewriting here. If a backend returns absolute URLs containing its own domain, users will be sent to the backend's domain; handle it in the backend, or adjust with `resHeaders` / `resHeadersCallback`.
 
 **Path matching and cross-host fallback:**
@@ -2211,10 +2228,8 @@ pxy.init(app)
 | `maxBody` | `50000000` | Request body limit in bytes; see above |
 | `methods` | `['GET','POST','PUT','DELETE','OPTIONS','HEAD','PATCH','TRACE']` | Methods used when registering routes |
 | `full` | `false` | Full-proxy mode: an unmatched request returns 502 instead of calling `next()`. When `defaultServer` is configured the fallback takes precedence |
-| `addIP` | `false` | When `true`, **append** the client IP to an existing real-IP header (comma-separated chain) instead of overwriting it |
-| `realIPHeader` | `'x-real-ip'` | Name of the header carrying the client IP |
-| `realHostHeader` | `'x-real-host'` | Name of the header carrying the Host the client originally requested |
-| `realProtoHeader` | `'x-real-proto'` | Name of the header carrying the protocol the client originally used (`http` / `https`) |
+| `addIP` | `false` | Whether to send the client IP to the backend. **Off by default**: nothing is written, and a same-named header from the client is forwarded as-is. When `true` it is written, **appended** as a comma-separated chain if a value already exists. This happens before the backend's configured `headers` are applied, so a configured header of the same name overrides it |
+| `realIPHeader` | `'x-real-ip'` | Name of the header carrying the client IP when `addIP` is `true` |
 | `balancer` | `null` | Custom load balancer providing `select(c, prlist, pxybalance)`. `Topbit.ProxyBalancer` (identity-based consistent hashing) is built in |
 | `connectOptions` | `{family: 4}` | Connection options passed to the underlying request; each key can be overridden per backend |
 | `maxSockets` | `1000` | Max sockets per backend Agent |
