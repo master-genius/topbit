@@ -200,8 +200,9 @@ class ProxyNoAgent {
 
     this.autoClearListeners = false
 
-    //记录定时器
-    this.proxyIntervals = Object.create(null)
+    // 存活检测：唯一的定时器句柄（没有需要检测的后端时为 null），与被检测的后端对象数组
+    this.aliveTimer = null
+    this.aliveTargets = []
 
     //存活检测是否已停止；停止后 timerRequest 的补测不再自我续接
     this.aliveCheckStopped = false
@@ -538,7 +539,8 @@ class ProxyNoAgent {
             weight: 1,
             weightCount : 0,
             alive : true,
-            aliveCheckInterval : 5,
+            // 默认不检测：显式设置大于 0 的 aliveCheckInterval 才会启动该后端的存活检测
+            aliveCheckInterval : 0,
             aliveCheckPath : '/',
             aliveCheckMethod: (tmp.aliveCheckMethod
                               && (['GET', 'TRACE', 'HEAD'].includes(tmp.aliveCheckMethod)) )
@@ -1089,62 +1091,94 @@ class ProxyNoAgent {
     req.end()
   }
 
-  setTimer(pxys) {
-    let count = 0
+  /**
+   * 收集全部后端，并标出哪些需要定时检测（aliveCheckInterval > 0）。
+   *
+   * 同一个后端对象可能被多个 host key 共享（:80 / :443 别名），按对象去重，
+   * 每个后端只出现一次——不依赖 key 的写法，也不会因此被重复计时。
+   */
+  collectAliveEntries() {
+    const seen = new Set()
+    const entries = []
 
-    for (let p of pxys) {
-      if (p.aliveCheckInterval > 0) count++
-    }
+    for (const host in this.hostProxy) {
+      for (const path in this.hostProxy[host]) {
+        for (const pr of this.hostProxy[host][path]) {
+          if (seen.has(pr)) continue
 
-    if (count === 0) return null
-    
-    let self = this
-
-    return setInterval(() => {
-      for (let i = 0; i < pxys.length; i++) {
-        if (pxys[i].aliveCheckInterval <= 0) continue
-
-        pxys[i].intervalCount++
-
-        if (pxys[i].intervalCount >= pxys[i].aliveCheckInterval) {
-          pxys[i].intervalCount = 0
-          self.timerRequest(pxys[i])
+          seen.add(pr)
+          entries.push({ host, path, pr, check: pr.aliveCheckInterval > 0 })
         }
       }
+    }
 
-    }, 1000)
-    
+    return entries
   }
 
   /**
-   * 启动全部后端的存活检测定时器。
+   * debug 时输出存活检测的启动情况：是否启动定时器，检测与跳过了哪些后端。
+   */
+  printAliveCheck(entries) {
+    const name = this.constructor.name
+    const n = this.aliveTargets.length
+
+    console.log(n > 0
+      ? `[${name}] 存活检测：已启动，1 个定时器，检测 ${n} 个后端`
+      : `[${name}] 存活检测：未启动（没有 aliveCheckInterval > 0 的后端）`)
+
+    for (const e of entries) {
+      const where = `${e.host}  ${e.path}  ${e.pr.url}`
+
+      if (e.check) {
+        console.log(`  检测  ${where}  每 ${e.pr.aliveCheckInterval}s  ${e.pr.aliveCheckMethod} ${e.pr.aliveCheckPath}`)
+      } else {
+        console.log(`  跳过  ${where}  aliveCheckInterval=0`)
+      }
+    }
+  }
+
+  /**
+   * 启动存活检测。
    *
    * init() 末尾调用；stopAliveCheck() 之后可再次调用恢复。
    * 重复调用无副作用——先停再起，不会遗留旧定时器。
+   *
+   * 只检测 aliveCheckInterval > 0 的后端，全部为 0（默认值）时不创建定时器；
+   * 否则全局只有一个 1 秒节拍的定时器，每个后端按自己的间隔计数。
    */
   startAliveCheck() {
     this.stopAliveCheck()
 
     this.aliveCheckStopped = false
 
-    for (let k in this.hostProxy) {
-      // :80/:443 别名 key：仅当对应裸 key 存在时跳过（裸 key 负责 alive 检测）；
-      // 手工配置的带端口 key 无裸 key 对应，不跳过
-      if (k.endsWith(':80') && this.hostProxy[k.slice(0, -3)] !== undefined) continue
-      if (k.endsWith(':443') && this.hostProxy[k.slice(0, -4)] !== undefined) continue
+    const entries = this.collectAliveEntries()
 
-      this.proxyIntervals[k] = Object.create(null)
+    this.aliveTargets = entries.filter(e => e.check).map(e => e.pr)
 
-      for (let p in this.hostProxy[k]) {
-        this.proxyIntervals[k][p] = this.setTimer(this.hostProxy[k][p])
-      }
+    if (this.aliveTargets.length > 0) {
+      const targets = this.aliveTargets
+
+      this.aliveTimer = setInterval(() => {
+        for (let i = 0; i < targets.length; i++) {
+          if (targets[i].aliveCheckInterval <= 0) continue
+
+          targets[i].intervalCount++
+
+          if (targets[i].intervalCount >= targets[i].aliveCheckInterval) {
+            targets[i].intervalCount = 0
+            this.timerRequest(targets[i])
+          }
+        }
+      }, 1000)
     }
+
+    this.debug && this.printAliveCheck(entries)
 
     return this
   }
 
   /**
-   * 停止全部存活检测定时器。
+   * 停止存活检测定时器。
    *
    * 优雅重载时必须调用：server.close() 只停止 accept 新连接，存活检测的
    * setInterval 仍在跑，会让老实例无法被回收，并持续向后端发探测请求。
@@ -1155,14 +1189,10 @@ class ProxyNoAgent {
   stopAliveCheck() {
     this.aliveCheckStopped = true
 
-    for (let k in this.proxyIntervals) {
-      let t = this.proxyIntervals[k]
-      for (let p in t) {
-        if (t[p]) clearInterval(t[p])
-      }
-    }
+    if (this.aliveTimer) clearInterval(this.aliveTimer)
 
-    this.proxyIntervals = Object.create(null)
+    this.aliveTimer = null
+    this.aliveTargets = []
 
     for (let t of this.retryTimers) clearTimeout(t)
     this.retryTimers.clear()

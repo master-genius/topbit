@@ -115,13 +115,8 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   check('setRealIP:true 也不注入 x-real-host', h4['x-real-host'] === undefined, String(h4['x-real-host']));
 
   //---------- 存活检测启停 ----------
-  const countTimers = (px) => {
-    let n = 0;
-    for (const k in px.proxyIntervals) {
-      for (const p in px.proxyIntervals[k]) if (px.proxyIntervals[k][p]) n++;
-    }
-    return n;
-  };
+  // 存活检测全局只有一个定时器；没有需要检测的后端时为 null
+  const countTimers = (px) => (px.aliveTimer ? 1 : 0);
 
   const pxT = new Proxy({
     port: 0,

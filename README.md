@@ -2311,7 +2311,7 @@ pxy.init(app)
 | `maxFreeSockets` | `100` | Max free sockets per backend Agent |
 | `agentKeepAlive` | `true` | Whether the backend Agent uses keepAlive |
 | `autoClearListeners` | `false` | Remove listeners from the backend response object after forwarding completes |
-| `debug` | `false` | Print debug output |
+| `debug` | `false` | Print debug output; when the alive check starts it also prints whether a timer was started and which backends are checked or skipped |
 
 **Backend options (each entry in `config`):**
 
@@ -2327,10 +2327,42 @@ pxy.init(app)
 | `resHeaders` | `null` | Extra headers added to the response; names are lower-cased as well |
 | `resHeadersCallback` | `null` | Function to post-process backend response headers |
 | `rewrite` | `null` | Function `(ctx, path)` returning the rewritten path; a falsy return means no rewrite |
-| `aliveCheckPath` | `'/'` | Path used by the alive check request |
-| `aliveCheckInterval` | `5` | Alive check interval in seconds, range 0 ~ 7200; `0` disables it |
-| `aliveCheckMethod` | `'GET'` | Method used by the alive check; one of `GET`, `HEAD`, `TRACE` |
+| `aliveCheckPath` | `'/'` | Path used by the alive check request; only used when the alive check is enabled |
+| `aliveCheckInterval` | `0` | Alive check interval in seconds, range 0 ~ 7200. **Defaults to `0`, i.e. no checking**: the backend is always treated as alive. Only a value greater than 0 set explicitly enables the check for this backend |
+| `aliveCheckMethod` | `'GET'` | Method used by the alive check; one of `GET`, `HEAD`, `TRACE`; only used when the alive check is enabled |
 | `connectOptions` | inherits instance | Connection options for this backend only |
+
+**Alive check:**
+
+There is no alive check by default. Only backends with an explicitly set `aliveCheckInterval` (greater than 0) are checked, and a backend that fails the check is temporarily removed from load balancing. When no backend enables it, no timer is created; when some do, there is a single timer for the whole proxy that all checked backends share, each counting its own interval. Set `debug: true` to see at startup which backends are checked and which are skipped:
+
+```javascript
+new Proxy({
+    // print the alive-check startup status and the backend list at startup
+    debug : true,
+    config : {
+        'xyz.com': [
+            {
+                url : 'http://127.0.0.1:8001',
+                // explicitly greater than 0: GET /health every 5 seconds
+                aliveCheckInterval : 5,
+                aliveCheckPath : '/health'
+            },
+            {
+                // not set (default 0): not checked, always treated as alive
+                url : 'http://127.0.0.1:8002'
+            }
+        ]
+    }
+})
+
+// printed at startup:
+// [Proxy] 存活检测：已启动，1 个定时器，检测 1 个后端
+//   检测  xyz.com  /*  http://127.0.0.1:8001  每 5s  GET /health
+//   跳过  xyz.com  /*  http://127.0.0.1:8002  aliveCheckInterval=0
+```
+
+> Note: since 3.8.2 the default of `aliveCheckInterval` is `0` instead of `5`. Configurations that relied on the default check to take failed backends out of rotation must now set `aliveCheckInterval` explicitly.
 
 **Methods:**
 

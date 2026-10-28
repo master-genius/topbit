@@ -56,26 +56,18 @@ let p9 = new Proxy({ port: 443, config: { 'x.com': [
   { url: 'http://127.0.0.1:3001', aliveCheckInterval: 2 }
 ] } });
 p9.init(mockApp);
-assert.ok(typeof p9.proxyIntervals['x.com'] === 'object'
-          && !!p9.proxyIntervals['x.com']['/*'],
-  '裸 key 应建立 alive 定时器');
-assert.ok(p9.proxyIntervals['x.com:443'] === undefined, ':443 别名 key 不应建立定时器');
-for (let k in p9.proxyIntervals) {
-  for (let p in p9.proxyIntervals[k]) clearInterval(p9.proxyIntervals[k][p]);
-}
+assert.ok(!!p9.aliveTimer, '应建立 alive 定时器');
+assert.strictEqual(p9.aliveTargets.length, 1, ':443 别名与裸 key 共享同一后端，只检测一次');
+p9.stopAliveCheck();
 
 // 场景10：proxyNoAgent 的 init 同样跳过 :443
 let p10 = new ProxyNoAgent({ port: 443, config: { 'x.com': [
   { url: 'http://127.0.0.1:3001', aliveCheckInterval: 2 }
 ] } });
 p10.init(mockApp);
-assert.ok(typeof p10.proxyIntervals['x.com'] === 'object'
-          && !!p10.proxyIntervals['x.com']['/*'],
-  'proxyNoAgent 裸 key 应建立 alive 定时器');
-assert.ok(p10.proxyIntervals['x.com:443'] === undefined, 'proxyNoAgent :443 别名 key 不应建立定时器');
-for (let k in p10.proxyIntervals) {
-  for (let p in p10.proxyIntervals[k]) clearInterval(p10.proxyIntervals[k][p]);
-}
+assert.ok(!!p10.aliveTimer, 'proxyNoAgent 应建立 alive 定时器');
+assert.strictEqual(p10.aliveTargets.length, 1, 'proxyNoAgent :443 别名与裸 key 共享同一后端，只检测一次');
+p10.stopAliveCheck();
 
 // 场景11：port 为空 + 手工带端口 key → 自动补裸，双 key 共享
 let p11 = new Proxy({ config: { 'x.com:443': [
@@ -84,22 +76,18 @@ let p11 = new Proxy({ config: { 'x.com:443': [
 p11.init(mockApp);
 assert.ok(!!p11.hostProxy['x.com'] && !!p11.hostProxy['x.com:443'], 'port 空 + :443 key 应补裸生成双 key');
 assert.strictEqual(p11.hostProxy['x.com']['/*'], p11.hostProxy['x.com:443']['/*'], '双 key 共享同一数组');
-assert.ok(!!p11.proxyIntervals['x.com']['/*'], '补裸后裸 key 应建立 timer');
-assert.ok(p11.proxyIntervals['x.com:443'] === undefined, ':443 别名应跳过 timer');
-for (let k in p11.proxyIntervals) {
-  for (let p in p11.proxyIntervals[k]) clearInterval(p11.proxyIntervals[k][p]);
-}
+assert.ok(!!p11.aliveTimer, '补裸后应建立 timer');
+assert.strictEqual(p11.aliveTargets.length, 1, '补裸后双 key 共享，:443 别名不重复检测');
+p11.stopAliveCheck();
 
 // 场景12：port=443 + 裸 key 展开双 key → :443 别名跳过（对照场景11）
 let p12 = new Proxy({ port: 443, config: { 'x.com': [
   { url: 'http://127.0.0.1:3001', aliveCheckInterval: 2 }
 ] } });
 p12.init(mockApp);
-assert.ok(!!p12.proxyIntervals['x.com']['/*'], '双 key 场景裸 key 应建立 timer');
-assert.ok(p12.proxyIntervals['x.com:443'] === undefined, '双 key 场景 :443 别名应跳过');
-for (let k in p12.proxyIntervals) {
-  for (let p in p12.proxyIntervals[k]) clearInterval(p12.proxyIntervals[k][p]);
-}
+assert.ok(!!p12.aliveTimer, '双 key 场景应建立 timer');
+assert.strictEqual(p12.aliveTargets.length, 1, '双 key 场景 :443 别名不重复检测');
+p12.stopAliveCheck();
 
 // 场景13：port=443 + 带端口 key → 补裸，双 key 共享
 let p13 = new Proxy({ port: 443, config: { 'x.com:443': [

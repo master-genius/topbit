@@ -2351,7 +2351,7 @@ pxy.init(app)
 | `maxFreeSockets` | `100` | 每个后端 Agent 的最大空闲连接数 |
 | `agentKeepAlive` | `true` | 后端 Agent 是否启用 keepAlive |
 | `autoClearListeners` | `false` | 转发结束后清理后端响应对象上的监听器 |
-| `debug` | `false` | 输出调试信息 |
+| `debug` | `false` | 输出调试信息；启动存活检测时还会输出是否启动了定时器，以及检测、跳过了哪些后端 |
 
 **后端配置项（`config` 中每一项）：**
 
@@ -2367,14 +2367,46 @@ pxy.init(app)
 | `resHeaders` | `null` | 附加到响应上的头，头名同样统一转小写 |
 | `resHeadersCallback` | `null` | 函数，自定义处理后端响应头 |
 | `rewrite` | `null` | 函数 `(ctx, path)`，返回改写后的路径，返回空值表示不改写 |
-| `aliveCheckPath` | `'/'` | 存活检测请求的路径 |
-| `aliveCheckInterval` | `5` | 存活检测间隔（秒），范围 0 ~ 7200，`0` 表示关闭 |
-| `aliveCheckMethod` | `'GET'` | 存活检测使用的方法，可选 `GET`、`HEAD`、`TRACE` |
+| `aliveCheckPath` | `'/'` | 存活检测请求的路径，仅在启用存活检测时使用 |
+| `aliveCheckInterval` | `0` | 存活检测间隔（秒），范围 0 ~ 7200。**默认 `0`，即不检测**，该后端始终视为存活；显式设置为大于 0 的数字才会检测这个后端 |
+| `aliveCheckMethod` | `'GET'` | 存活检测使用的方法，可选 `GET`、`HEAD`、`TRACE`，仅在启用存活检测时使用 |
 | `connectOptions` | 继承实例 | 该后端专用的连接选项 |
+
+**存活检测：**
+
+默认不做存活检测。只有显式设置了 `aliveCheckInterval`（大于 0）的后端才会被检测，检测失败的后端会被负载均衡暂时剔除。所有后端都未启用时不会创建定时器；启用时全局只有一个定时器，所有被检测的后端共用它，各自按自己的间隔计数。设置 `debug: true` 可以在启动时看到哪些后端被检测、哪些被跳过：
+
+```javascript
+new Proxy({
+    // 启动时输出存活检测的启动情况与后端列表
+    debug : true,
+    config : {
+        'xyz.com': [
+            {
+                url : 'http://127.0.0.1:8001',
+                // 显式设置大于 0：每 5 秒用 GET 请求 /health
+                aliveCheckInterval : 5,
+                aliveCheckPath : '/health'
+            },
+            {
+                // 不设置（默认 0）：不检测，始终视为存活
+                url : 'http://127.0.0.1:8002'
+            }
+        ]
+    }
+})
+
+// 启动时输出：
+// [Proxy] 存活检测：已启动，1 个定时器，检测 1 个后端
+//   检测  xyz.com  /*  http://127.0.0.1:8001  每 5s  GET /health
+//   跳过  xyz.com  /*  http://127.0.0.1:8002  aliveCheckInterval=0
+```
+
+> 注意：3.8.2 起 `aliveCheckInterval` 的默认值由 `5` 改为 `0`。以前依赖默认检测来摘除故障后端的配置，需要显式写上 `aliveCheckInterval`。
 
 **接口说明：**
 
-*   `init(app)`: 挂载到 topbit 实例，注册代理路由与中间件，并启动存活检测。
+*   `init(app)`: 挂载到 topbit 实例，注册代理路由与中间件，并启动存活检测（没有需要检测的后端时不创建定时器）。
 *   `stopAliveCheck()`: 停止全部存活检测定时器，返回 `this`。**优雅重载时必须调用** —— `server.close()` 只停止 accept 新连接，存活检测的定时器仍在跑，会让老实例无法被回收，并持续向后端发探测请求。连接失败后的那次补测句柄也会一并清理。
 *   `startAliveCheck()`: 启动（或重新启动）存活检测，返回 `this`。重复调用先停再起，不会遗留旧定时器。
 
