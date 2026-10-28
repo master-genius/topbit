@@ -68,6 +68,7 @@ async function testIdleKeepsResident() {
   const pool = new Http2Pool({
     url: `http://127.0.0.1:${srv.address().port}`,
     timeout: 200,
+    connectTimeout: 100,   // 须不大于 timeout，否则 timeout 会被抬高，空闲回收时间随之改变
     reconnDelay: 50,
     maxConnect: 10
   })
@@ -160,6 +161,7 @@ async function testOkAfterIdleReclaim() {
   const pool = new Http2Pool({
     url: `http://127.0.0.1:${port}`,
     timeout: 200,
+    connectTimeout: 100,
     minConnect: 0,
     maxConnect: 5
   })
@@ -295,7 +297,8 @@ async function testZeroMinConnectFailWindow() {
       url: `http://127.0.0.1:${port}`,
       minConnect: mc,
       failWindow: 400,
-      timeout: 200
+      timeout: 200,
+      connectTimeout: 100
     })
 
     // 不调用 createPool：池一直为空，直到有请求才建连（lazy 语义）
@@ -437,6 +440,38 @@ async function testLateConnectNoSlotLeak() {
   console.log('  ✓ 握手超时后才连上：配额不泄漏，minConnect<=0 可回收、>0 保持常驻')
 }
 
+// ---------- 用例10：空闲超时小于握手等待上限时自动抬高 ----------
+async function testIdleTimeoutRaisedAboveConnectTimeout() {
+  const mk = (timeout, connectTimeout, viaConnectOptions = true) => new Http2Pool({
+    url: 'http://127.0.0.1:1',
+    connectTimeout,
+    ...(viaConnectOptions ? { connectOptions: { timeout } } : { timeout })
+  })
+
+  assert.strictEqual(mk(300, 1000).connectOptions.timeout, 6000, 'timeout < connectTimeout 应抬高为 connectTimeout + 5000')
+  assert.strictEqual(mk(300, 1000, false).connectOptions.timeout, 6000, '经 options.timeout 传入同样适用')
+  assert.strictEqual(mk(999, 1000).connectOptions.timeout, 6000, '仅差 1ms 也属于小于')
+  assert.strictEqual(mk(1000, 1000).connectOptions.timeout, 1000, '相等不处理')
+  assert.strictEqual(mk(2000, 1000).connectOptions.timeout, 2000, '大于不处理')
+  assert.strictEqual(mk(0, 1000).connectOptions.timeout, 0, 'timeout=0 表示不超时，必须原样保留')
+  assert.strictEqual(mk(-1, 1000).connectOptions.timeout, -1, '非正数不处理')
+
+  // 功能：timeout 小于握手耗时。修正前连接会在握手中途被当作空闲关掉，请求拿不到结果
+  const be = await slowTlsBackend(600)
+  const pool = new Http2Pool({
+    url: `https://127.0.0.1:${be.port}`,
+    minConnect: 0,
+    connectTimeout: 1500,
+    connectOptions: { timeout: 300 }   // 小于握手耗时 600ms
+  })
+  assert.strictEqual(pool.connectOptions.timeout, 6500)
+  await simpleGet(pool)
+  pool.sessions.slice().forEach(w => w.session.destroy())
+  be.close()
+
+  console.log('  ✓ 空闲超时 < connectTimeout 时抬高为 +5000，0 与非正数原样保留，慢握手不再被误关')
+}
+
 ;(async () => {
   console.log('Http2Pool 回归测试')
   await testGoawayDrain()
@@ -448,6 +483,7 @@ async function testLateConnectNoSlotLeak() {
   await testZeroMinConnectFailWindow()
   await testPositiveMinConnectUnchanged()
   await testLateConnectNoSlotLeak()
+  await testIdleTimeoutRaisedAboveConnectTimeout()
   console.log('全部通过')
   process.exit(0)
 })().catch(err => {

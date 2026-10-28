@@ -60,7 +60,22 @@ class Http2Pool {
       timeout: options.timeout || 30000,
       ...options.connectOptions
     }
-    
+
+    /**
+     * 空闲超时（session.setTimeout 与 socket timeout 共用 connectOptions.timeout）
+     * 在握手阶段同样计时。若它小于握手等待上限 connectTimeout，连接会在握手中途被
+     * 当作空闲关掉，请求再怎么等也等不到。此时抬高到 connectTimeout + 5000：
+     * 5 秒余量覆盖「超过 connectTimeout 后才握手成功」的迟到连接。
+     * 只处理 timeout > 0 的情形；0 表示不超时，必须原样保留。
+     */
+    const idleTimeout = this.connectOptions.timeout
+    if (typeof idleTimeout === 'number' && idleTimeout > 0 && idleTimeout < this.connectTimeout) {
+      this.connectOptions.timeout = this.connectTimeout + 5000
+      if (this.debug) {
+        console.error(`[H2Pool] timeout(${idleTimeout}) 小于 connectTimeout(${this.connectTimeout})，已调整为 ${this.connectOptions.timeout}`)
+      }
+    }
+
     this.waitQueue = [] // 等待可用连接的队列
 
     // 重连退避状态：全池共享，同一时刻只保留一个在途重连任务

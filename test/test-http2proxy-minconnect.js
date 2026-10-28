@@ -62,8 +62,10 @@ async function setup(bport, aport, proxyOpts, backendCfg) {
   const { srv, st } = await startBackend(bport)
 
   const pxy = new Http2Proxy({
-    // 空闲回收时长取自实例 timeout，调小以便测试
+    // 空闲回收时长取自实例 timeout，调小以便测试；
+    // connectTimeout 须不大于 timeout，否则 timeout 会被抬高
     timeout: 600,
+    connectTimeout: 300,
     config: {
       'mc.test': [{ path: '/', url: `http://127.0.0.1:${bport}`, ...backendCfg }]
     },
