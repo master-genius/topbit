@@ -65,7 +65,7 @@ Promise.all([
   const { Proxy } = Topbit.extensions;
 
   const pxy = new Proxy({
-    addIP: true,
+    setRealIP: true,
     config: {
       'basic.test': [{
         path: '/', url: 'http://127.0.0.1:39811',
@@ -112,7 +112,7 @@ Promise.all([
     try { j = JSON.parse(r.body); } catch (e) { }
     check('GET 状态 200', r.code === 200);
     check('GET 路径+query 透传', j.url === '/api/data?x=1&y=2', `实际 ${j.url}`);
-    check('GET x-real-ip 注入（addIP:true）', typeof j.ip === 'string' && j.ip.length > 0);
+    check('GET x-real-ip 注入（setRealIP:true）', typeof j.ip === 'string' && j.ip.length > 0);
     check('GET 配置请求头覆盖', j.ua === 'cv');
     check('GET resHeaders 静态响应头', r.headers['x-res-static'] === 'S');
     check('GET 后端响应头透传', r.headers['x-backend'] === 'b1');

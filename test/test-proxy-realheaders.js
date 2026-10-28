@@ -3,9 +3,10 @@
 /**
  * 代理：不自动注入 x-real-* 请求头，与存活检测的启停接口
  *
- * 1) 代理不再自动写入 x-real-host / x-real-proto，addIP 默认关闭时也不写 x-real-ip；
- *    客户端带来的同名头原样透传。需要时由用户在后端配置的 headers 里自定义，
- *    或开启 addIP 写入客户端 IP。（三种代理的完整矩阵见 test-proxy-auto-headers.js）
+ * 1) 代理不再自动写入 x-real-host / x-real-proto，客户端带来的同名头原样透传；
+ *    x-real-ip 由 setRealIP 控制，默认关闭时不写入且丢弃客户端带来的值。
+ *    需要时由用户在后端配置的 headers 里自定义，或开启 setRealIP。
+ *    （三种代理的完整矩阵见 test-proxy-auto-headers.js）
  *
  * 2) startAliveCheck() / stopAliveCheck()：server.close() 只停止 accept，
  *    存活检测的 setInterval 仍在跑会让老实例无法回收并持续探测后端。
@@ -71,11 +72,11 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   px2.init(app2);
   app2.run(P.tls);
 
-  //---------- addIP:true ----------
+  //---------- setRealIP:true ----------
   const app3 = new Topbit({parseBody: false});
   const px3 = new Proxy({
     port: P.custom,
-    addIP: true,
+    setRealIP: true,
     config: hostCfg(`c.test:${P.custom}`)
   });
   px3.init(app3);
@@ -87,7 +88,7 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   let h = await get(P.plain, {host: `a.test:${P.plain}`});
   check('默认不注入 x-real-host', h['x-real-host'] === undefined, String(h['x-real-host']));
   check('默认不注入 x-real-proto', h['x-real-proto'] === undefined, String(h['x-real-proto']));
-  check('默认不写 x-real-ip（addIP 关闭）', h['x-real-ip'] === undefined, String(h['x-real-ip']));
+  check('默认不写 x-real-ip（setRealIP 关闭）', h['x-real-ip'] === undefined, String(h['x-real-ip']));
 
   //---- TLS 下同样不注入 ----
   let h2 = await get(P.tls, {host: `b.test:${P.tls}`}, true);
@@ -103,11 +104,15 @@ const hostCfg = (h) => ({ [h]: [{ path: '/p', url: `http://127.0.0.1:${P.backend
   check('客户端的 x-real-proto 原样透传', h3['x-real-proto'] === 'https', h3['x-real-proto']);
   check('客户端的 x-real-host 原样透传', h3['x-real-host'] === 'evil.test', h3['x-real-host']);
 
-  //---- addIP:true 才写入 x-real-ip ----
+  //---- 默认下客户端自带的 x-real-ip 被丢弃 ----
+  let h5 = await get(P.plain, {host: `a.test:${P.plain}`, 'x-real-ip': '9.9.9.9'});
+  check('默认丢弃客户端的 x-real-ip', h5['x-real-ip'] === undefined, String(h5['x-real-ip']));
+
+  //---- setRealIP:true 才写入 x-real-ip ----
   let h4 = await get(P.custom, {host: `c.test:${P.custom}`});
-  check('addIP:true 写入 x-real-ip',
+  check('setRealIP:true 写入 x-real-ip',
         typeof h4['x-real-ip'] === 'string' && h4['x-real-ip'].includes('127.0.0.1'), h4['x-real-ip']);
-  check('addIP:true 也不注入 x-real-host', h4['x-real-host'] === undefined, String(h4['x-real-host']));
+  check('setRealIP:true 也不注入 x-real-host', h4['x-real-host'] === undefined, String(h4['x-real-host']));
 
   //---------- 存活检测启停 ----------
   const countTimers = (px) => {

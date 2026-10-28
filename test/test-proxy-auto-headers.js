@@ -2,10 +2,12 @@
 
 // 三个代理（Proxy / ProxyNoAgent / Http2Proxy）的请求头注入规则验证
 // 通用规则：
-//   1. 代理不自动注入 x-real-host / x-real-proto，默认也不写 x-real-ip（addIP 默认 false）
-//   2. 客户端带来的头原样透传，不屏蔽
-//   3. 后端配置里的 headers 同名时覆盖（含自动写入的 x-real-ip）
-//   4. addIP 为 true 时写入客户端 IP，已有值则追加成逗号链
+//   1. 代理不自动注入 x-real-host / x-real-proto；客户端带来的这类头原样透传
+//   2. x-real-ip 由 setRealIP 控制，默认 false：不写入，并丢弃客户端带来的同名头
+//   3. setRealIP 为 true：由代理写入真实请求 IP，客户端的值不能覆盖
+//   4. addIP 为 true（多级代理）：把本级 IP 追加到已有值后面；仅在 setRealIP 为 true 时生效
+//   5. 后端配置 headers 里的同名头最后覆盖，对所有头一视同仁
+//   6. realIPHeader 可自定义头名，大小写不敏感
 //
 // 运行：node test/test-proxy-auto-headers.js
 
@@ -24,10 +26,10 @@ function check(name, cond, extra = '') {
 const sleep = ms => new Promise(rv => setTimeout(rv, ms))
 
 const pick = h => JSON.stringify({
-  host: h['x-real-host'], proto: h['x-real-proto'], ip: h['x-real-ip']
+  host: h['x-real-host'], proto: h['x-real-proto'], ip: h['x-real-ip'], cip: h['x-client-ip']
 })
 
-// h1 后端 / h2c 后端：回显收到的三个头
+// h1 后端 / h2c 后端：回显收到的几个头
 const h1backend = http.createServer((rq, rs) => { rs.end(pick(rq.headers)) })
 const h2backend = http2.createServer()
 h2backend.on('stream', (stream, headers) => {
@@ -60,6 +62,14 @@ function startApp(pxy) {
   return port
 }
 
+// 捕获构造期间的 console.error
+function withCapturedErrors(fn) {
+  const msgs = []
+  const orig = console.error
+  console.error = (...a) => { msgs.push(a.join(' ')) }
+  try { return [fn(), msgs] } finally { console.error = orig }
+}
+
 ;(async () => {
   await new Promise(rv => h1backend.listen(39950, '127.0.0.1', rv))
   await new Promise(rv => h2backend.listen(39951, '127.0.0.1', rv))
@@ -74,56 +84,98 @@ function startApp(pxy) {
     const opt = { path: '/', url, aliveCheckInterval: 0 }
     const extra = name === 'Http2Proxy' ? { minConnect: 0 } : {}
 
-    // 实例 1：addIP 默认；d.test 无配置头，c.test 配置同名头
-    const p1 = startApp(new Cls({
+    // 默认：d.test 无配置头，c.test 配置同名头
+    const pDef = startApp(new Cls({
       ...extra,
-      config: {
-        'd.test': [{ ...opt }],
-        'c.test': [{ ...opt, headers: CFG_HEADERS }]
-      }
+      config: { 'd.test': [{ ...opt }], 'c.test': [{ ...opt, headers: CFG_HEADERS }] }
     }))
 
-    // 实例 2：addIP:true；i.test 无配置头，ic.test 配置了 x-real-ip
-    const p2 = startApp(new Cls({
+    // setRealIP:true：i.test 无配置头，ic.test 配置了 x-real-ip
+    const pSet = startApp(new Cls({
+      ...extra,
+      setRealIP: true,
+      config: { 'i.test': [{ ...opt }], 'ic.test': [{ ...opt, headers: { 'x-real-ip': 'cfg-ip' } }] }
+    }))
+
+    // setRealIP + addIP：多级代理
+    const pChain = startApp(new Cls({
+      ...extra,
+      setRealIP: true,
+      addIP: true,
+      config: { 'a.test': [{ ...opt }] }
+    }))
+
+    // 仅 addIP：不应生效，并给出提示
+    const [pxyOnlyAdd, warns] = withCapturedErrors(() => new Cls({
       ...extra,
       addIP: true,
-      config: {
-        'i.test': [{ ...opt }],
-        'ic.test': [{ ...opt, headers: { 'x-real-ip': 'cfg-ip' } }]
-      }
+      config: { 'w.test': [{ ...opt }] }
+    }))
+    const pOnlyAdd = startApp(pxyOnlyAdd)
+
+    // 自定义头名（混合大小写）
+    const pName = startApp(new Cls({
+      ...extra,
+      setRealIP: true,
+      realIPHeader: 'X-Client-Ip',
+      config: { 'n.test': [{ ...opt }] }
     }))
 
     await sleep(300)
 
-    let r = await call(p1, 'd.test')
+    // ---- 默认 ----
+    let r = await call(pDef, 'd.test')
     check(`${name} 默认：不注入 x-real-host`, r.host === undefined, String(r.host))
     check(`${name} 默认：不注入 x-real-proto`, r.proto === undefined, String(r.proto))
     check(`${name} 默认：不写 x-real-ip`, r.ip === undefined, String(r.ip))
 
-    r = await call(p1, 'd.test', FORGED)
-    check(`${name} 客户端的 x-real-host 原样透传`, r.host === 'evil.test', String(r.host))
-    check(`${name} 客户端的 x-real-proto 原样透传`, r.proto === 'https', String(r.proto))
-    check(`${name} 客户端的 x-real-ip 原样透传（addIP 关闭）`, r.ip === '9.9.9.9', String(r.ip))
+    r = await call(pDef, 'd.test', FORGED)
+    check(`${name} 默认：客户端的 x-real-host 原样透传`, r.host === 'evil.test', String(r.host))
+    check(`${name} 默认：客户端的 x-real-proto 原样透传`, r.proto === 'https', String(r.proto))
+    check(`${name} 默认：客户端的 x-real-ip 被丢弃，不传给后端`, r.ip === undefined, String(r.ip))
 
-    r = await call(p1, 'c.test', FORGED)
-    check(`${name} 配置头覆盖客户端 x-real-host`, r.host === 'cfg.example', String(r.host))
-    check(`${name} 配置头覆盖客户端 x-real-proto`, r.proto === 'cfg-proto', String(r.proto))
-    check(`${name} 配置头覆盖客户端 x-real-ip`, r.ip === 'cfg-ip', String(r.ip))
+    r = await call(pDef, 'c.test', FORGED)
+    check(`${name} 配置头覆盖 x-real-host`, r.host === 'cfg.example', String(r.host))
+    check(`${name} 配置头覆盖 x-real-proto`, r.proto === 'cfg-proto', String(r.proto))
+    check(`${name} 配置头设置 x-real-ip（客户端值已被丢弃）`, r.ip === 'cfg-ip', String(r.ip))
 
-    r = await call(p2, 'i.test')
-    check(`${name} addIP:true 写入客户端 IP`, typeof r.ip === 'string' && r.ip.includes('127.0.0.1'), String(r.ip))
+    // ---- setRealIP:true ----
+    r = await call(pSet, 'i.test')
+    check(`${name} setRealIP:true 写入真实请求 IP`,
+          typeof r.ip === 'string' && r.ip.includes('127.0.0.1'), String(r.ip))
 
-    r = await call(p2, 'i.test', { 'x-real-ip': '9.9.9.9' })
-    check(`${name} addIP:true 已有值则追加成逗号链`,
+    r = await call(pSet, 'i.test', { 'x-real-ip': '9.9.9.9' })
+    check(`${name} setRealIP:true 客户端的值不能覆盖`,
+          typeof r.ip === 'string' && r.ip.includes('127.0.0.1') && !r.ip.includes('9.9.9.9'), String(r.ip))
+
+    r = await call(pSet, 'ic.test', { 'x-real-ip': '9.9.9.9' })
+    check(`${name} setRealIP:true 时配置里的同名头最后覆盖`, r.ip === 'cfg-ip', String(r.ip))
+
+    // ---- setRealIP + addIP ----
+    r = await call(pChain, 'a.test')
+    check(`${name} addIP：没有已有值时只写本级 IP`,
+          typeof r.ip === 'string' && r.ip.includes('127.0.0.1') && !r.ip.includes(','), String(r.ip))
+
+    r = await call(pChain, 'a.test', { 'x-real-ip': '9.9.9.9' })
+    check(`${name} addIP：已有值则追加成逗号链`,
           typeof r.ip === 'string' && r.ip.startsWith('9.9.9.9,') && r.ip.includes('127.0.0.1'), String(r.ip))
 
-    r = await call(p2, 'ic.test', { 'x-real-ip': '9.9.9.9' })
-    check(`${name} addIP:true 时配置里的同名头仍然覆盖`, r.ip === 'cfg-ip', String(r.ip))
+    // ---- 仅 addIP ----
+    check(`${name} 仅 addIP 时给出提示`, warns.some(m => m.includes('addIP 仅在 setRealIP 为 true 时生效')),
+          warns.join('|').slice(0, 80))
+    r = await call(pOnlyAdd, 'w.test', { 'x-real-ip': '9.9.9.9' })
+    check(`${name} 仅 addIP 不写入，客户端的值同样被丢弃`, r.ip === undefined, String(r.ip))
+
+    // ---- 自定义头名 ----
+    r = await call(pName, 'n.test', { 'x-client-ip': 'forged', 'x-real-ip': '9.9.9.9' })
+    check(`${name} 自定义 realIPHeader（大小写不敏感）写入真实 IP`,
+          typeof r.cip === 'string' && r.cip.includes('127.0.0.1') && !r.cip.includes('forged'), String(r.cip))
+    check(`${name} 自定义头名后，x-real-ip 不再受管，原样透传`, r.ip === '9.9.9.9', String(r.ip))
   }
 
   console.log(`\n通过 ${pass}，失败 ${fail}`)
   process.exit(fail > 0 ? 1 : 0)
 })().catch(err => {
-  console.error('测试异常：', err)
+  process.stderr.write(`测试异常：${err && err.stack}\n`)
   process.exit(1)
 })

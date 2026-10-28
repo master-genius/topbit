@@ -188,8 +188,12 @@ class ProxyNoAgent {
     // 代理传输总时长上限（毫秒），0 表示不限制；响应头到达后开始计时
     this.requestTimeout = 600000
 
-    // 是否向后端写入客户端 IP（头名见 realIPHeader）。默认 false：不写入，
-    // 客户端带来的同名头也原样透传；true：写入，已有值则追加成逗号链。
+    // 是否由代理向后端写入真实请求 IP（头名见 realIPHeader）。默认 false：不写入，
+    // 并且丢弃客户端带来的同名头（它不可信，也不应传给后端）；true：写入，客户端的值不能覆盖。
+    this.setRealIP = false
+
+    // 多级代理用：setRealIP 为 true 时，把本级看到的客户端 IP 追加到已有值后面形成逗号链，
+    // 否则直接用本级看到的 IP 覆盖。仅在 setRealIP 为 true 时生效。
     this.addIP = false
 
     this.debug = false
@@ -286,7 +290,16 @@ class ProxyNoAgent {
     for (let k in options) {
       switch (k) {
         case 'realIPHeader':
-          this.realIPHeader = options[k]
+          // 请求头名统一小写：入站头的 key 都是小写，大小写不一致会导致丢弃/追加匹配不上
+          if (typeof options[k] === 'string' && options[k].length > 0) {
+            this.realIPHeader = options[k].toLowerCase()
+          } else {
+            console.error(`realIPHeader 必须是非空字符串: ${options[k]}`)
+          }
+          break
+
+        case 'setRealIP':
+          this.setRealIP = !!options[k]
           break
 
         case 'config':
@@ -367,6 +380,9 @@ class ProxyNoAgent {
           }, 500)
       }
     }
+
+    // addIP 只是 setRealIP 的追加模式；单独设置不会写入任何头，提示以免静默失效
+    if (this.addIP && !this.setRealIP) console.error(`addIP 仅在 setRealIP 为 true 时生效，当前 setRealIP 为 false，addIP 被忽略。`)
 
     this.setHostProxy(this.config)
 
@@ -771,11 +787,14 @@ class ProxyNoAgent {
       urlobj.headers = cleanHeadersForHttp1(c.headers)
       urlobj.method = c.method
 
-      // 客户端 IP：默认不写入；addIP 为 true 时写入，已有值则追加成逗号链。
+      // 真实请求 IP。setRealIP 关闭时丢弃客户端带来的同名头，不传给后端；
+      // 开启时由代理写入，客户端的值不能覆盖（addIP 为 true 的多级代理则追加到已有值后面）。
       // 放在配置头之前，配置里的同名头随后可以覆盖
-      if (self.addIP) {
-        if (urlobj.headers[self.realIPHeader]) urlobj.headers[self.realIPHeader] += `,${c.ip}`
+      if (self.setRealIP) {
+        if (self.addIP && urlobj.headers[self.realIPHeader]) urlobj.headers[self.realIPHeader] += `,${c.ip}`
         else urlobj.headers[self.realIPHeader] = c.ip
+      } else {
+        delete urlobj.headers[self.realIPHeader]
       }
 
       // 合并配置的自定义请求头（配置覆盖客户端同名头）

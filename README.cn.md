@@ -2098,7 +2098,7 @@ config: {
 
 **自动注入的请求头：**
 
-代理**不会**自动添加 `x-real-host`、`x-real-proto`，默认也不写 `x-real-ip`（见 `addIP`）。通用规则只有两条：客户端带来的头原样转发，不屏蔽；后端配置里的 `headers` 同名时覆盖。需要让后端知道原始域名或协议时，自己在配置里设置：
+代理**不会**自动添加 `x-real-host`、`x-real-proto`。通用规则：客户端带来的头原样转发，不屏蔽；后端配置里的 `headers` 同名时覆盖。需要让后端知道原始域名或协议时，自己在配置里设置：
 
 ```javascript
 config: {
@@ -2111,7 +2111,17 @@ config: {
 }
 ```
 
-> 注意：客户端自己带来的 `x-real-host` / `x-real-proto` / `x-real-ip` 不会被屏蔽。后端若信任这些头，需要在配置里写同名头覆盖，或由前置的可信代理清除。
+`x-real-ip` 是例外，由 `setRealIP` 管理：默认不写入，并丢弃客户端带来的值，保证后端收到的要么没有、要么是代理自己写入的真实请求 IP。开启后：
+
+```javascript
+// 直接面向用户的代理：x-real-ip 就是请求的真实 IP，客户端伪造的值被覆盖
+new Proxy({ setRealIP : true, config : cfg })
+
+// 位于另一层代理之后的多级代理：保留上级写入的值，把本级 IP 追加在后面
+new Proxy({ setRealIP : true, addIP : true, config : cfg })
+```
+
+> 注意：客户端自己带来的 `x-real-host` / `x-real-proto` 不会被屏蔽。后端若信任这些头，需要在配置里写同名头覆盖，或由前置的可信代理清除。多级代理开启 `addIP` 时，会信任上级传来的 `x-real-ip`，请只在上级是可信代理时使用。
 
 > 注意：nginx 默认还会配合 `proxy_redirect default` 把后端响应里的绝对 `Location` 改回代理地址，这里**没有**这类响应头改写。后端返回带自己域名的绝对地址时，用户会被带到后端域名，需要后端自行处理，或用 `resHeaders` / `resHeadersCallback` 调整。
 
@@ -2269,8 +2279,9 @@ pxy.init(app)
 | `maxBody` | `50000000` | 请求体上限（字节），见上文 |
 | `methods` | `['GET','POST','PUT','DELETE','OPTIONS','HEAD','PATCH','TRACE']` | 注册路由时使用的请求方法集合 |
 | `full` | `false` | 全代理模式：未命中时直接返回 502，而不是 `next()` 交还中间件链。配置了 `defaultServer` 时以回退优先 |
-| `addIP` | `false` | 是否向后端写入客户端 IP。默认**不写入**，客户端带来的同名头也原样透传；为 `true` 时写入，已有值则**追加**成逗号分隔链。写入发生在应用后端配置 `headers` 之前，所以配置里的同名头可以覆盖 |
-| `realIPHeader` | `'x-real-ip'` | `addIP` 为 `true` 时携带客户端 IP 的请求头名称 |
+| `setRealIP` | `false` | 是否由代理向后端写入真实请求 IP。默认**不写入**，并且**丢弃**客户端带来的同名头（它不可信，也不传给后端）；为 `true` 时由代理写入，客户端的值不能覆盖。写入发生在应用后端配置 `headers` 之前，所以配置里的同名头可以最后覆盖 |
+| `addIP` | `false` | 多级代理用。`setRealIP` 为 `true` 时，把本级看到的客户端 IP **追加**到已有值后面形成逗号分隔链（如 `上级IP,本级IP`），否则直接覆盖。仅在 `setRealIP` 为 `true` 时生效，单独设置会给出提示 |
+| `realIPHeader` | `'x-real-ip'` | 携带真实请求 IP 的请求头名称，大小写不敏感。`setRealIP` 的丢弃与写入、`addIP` 的追加都只针对这个头 |
 | `balancer` | `null` | 自定义负载均衡器，需提供 `select(c, prlist, pxybalance)` 方法。框架内置 `Topbit.ProxyBalancer`（基于标识的一致性哈希） |
 | `connectOptions` | `{family: 4}` | 传给底层请求的连接选项，可被后端配置项 `connectOptions` 逐项覆盖 |
 | `maxSockets` | `1000` | 每个后端 Agent 的最大连接数 |

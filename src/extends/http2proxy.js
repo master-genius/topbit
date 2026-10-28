@@ -243,8 +243,12 @@ let Http2Proxy = function (options = {}) {
   // 冷启动（minConnect<=0 空闲回收后）并发请求会排队等握手完成，握手慢时需调大。
   this.queueTimeout = 3000
 
-  // 是否向后端写入客户端 IP（头名见 realIPHeader）。默认 false：不写入，
-  // 客户端带来的同名头也原样透传；true：写入，已有值则追加成逗号链。
+  // 是否由代理向后端写入真实请求 IP（头名见 realIPHeader）。默认 false：不写入，
+  // 并且丢弃客户端带来的同名头（它不可信，也不应传给后端）；true：写入，客户端的值不能覆盖。
+  this.setRealIP = false
+
+  // 多级代理用：setRealIP 为 true 时，把本级看到的客户端 IP 追加到已有值后面形成逗号链，
+  // 否则直接用本级看到的 IP 覆盖。仅在 setRealIP 为 true 时生效。
   this.addIP = false
 
   this.debug = false
@@ -273,7 +277,12 @@ let Http2Proxy = function (options = {}) {
   for (let k in options) {
     switch (k) {
       case 'realIPHeader':
-        this.realIPHeader = options[k]
+        // 请求头名统一小写：入站头的 key 都是小写，大小写不一致会导致丢弃/追加匹配不上
+        if (typeof options[k] === 'string' && options[k].length > 0) {
+          this.realIPHeader = options[k].toLowerCase()
+        } else {
+          console.error(`realIPHeader 必须是非空字符串: ${options[k]}`)
+        }
         break
 
       case 'config':
@@ -306,6 +315,7 @@ let Http2Proxy = function (options = {}) {
         }
         break
 
+      case 'setRealIP':
       case 'addIP':
       case 'full':
       case 'debug':
@@ -353,6 +363,9 @@ let Http2Proxy = function (options = {}) {
         }, 500)
     }
   }
+
+  // addIP 只是 setRealIP 的追加模式；单独设置不会写入任何头，提示以免静默失效
+  if (this.addIP && !this.setRealIP) console.error(`addIP 仅在 setRealIP 为 true 时生效，当前 setRealIP 为 false，addIP 被忽略。`)
 
   this.setHostProxy(this.config)
 
@@ -740,11 +753,14 @@ Http2Proxy.prototype.mid = function () {
     let pr = self.getBackend(c, host)
     if (!pr) return c.status(503).to(error_503_text)
 
-    // 客户端 IP：默认不写入；addIP 为 true 时写入，已有值则追加成逗号链。
-    // 配置里的同名头随后覆盖（见下方 pr.headers）
-    if (self.addIP) {
-      if (c.headers[self.realIPHeader]) c.headers[self.realIPHeader] += `,${c.ip}`
+    // 真实请求 IP。setRealIP 关闭时丢弃客户端带来的同名头，不传给后端；
+    // 开启时由代理写入，客户端的值不能覆盖（addIP 为 true 的多级代理则追加到已有值后面）。
+    // 这里直接改 c.headers（出站头就由它派生），配置里的同名头随后覆盖（见下方 pr.headers）
+    if (self.setRealIP) {
+      if (self.addIP && c.headers[self.realIPHeader]) c.headers[self.realIPHeader] += `,${c.ip}`
       else c.headers[self.realIPHeader] = c.ip
+    } else {
+      delete c.headers[self.realIPHeader]
     }
 
     let hii = pr.h2Pool
