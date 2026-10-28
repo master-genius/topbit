@@ -2163,6 +2163,31 @@ new Proxy({ setRealIP : true, addIP : true, config : cfg })
 
 > 注意：nginx 默认还会配合 `proxy_redirect default` 把后端响应里的绝对 `Location` 改回代理地址，这里**没有**这类响应头改写。后端返回带自己域名的绝对地址时，用户会被带到后端域名，需要后端自行处理，或用 `resHeaders` / `resHeadersCallback` 调整。
 
+**https 后端的证书校验：**
+
+代理到 `https://` 后端时，默认**不校验**后端证书（便于代理自签证书的内网服务）。需要校验时，在 `connectOptions` 里显式设置 `rejectUnauthorized: true`，实例级（对所有后端生效）与后端级（只对该后端生效，优先）都可以。后端证书不是公共 CA 签发时，用 `ca` 指定受信任的证书。校验失败的请求不会到达后端，代理返回 5xx。
+
+```javascript
+new Proxy({
+    // 实例级：所有 https 后端都校验证书
+    connectOptions : { rejectUnauthorized : true },
+    config : {
+        'xyz.com': [
+            {
+                url : 'https://ioo.com',
+                // 后端级：证书由自建 CA 签发时，指定受信任的 CA 证书（或自签证书本身）
+                connectOptions : { ca : fs.readFileSync('./ca.pem') }
+            },
+            {
+                url : 'https://legacy.internal',
+                // 后端级覆盖实例级：这个后端单独关闭校验
+                connectOptions : { rejectUnauthorized : false }
+            }
+        ]
+    }
+})
+```
+
 **路径匹配与跨 host 降级：**
 
 配置里的 `path` 会被规范成前缀路由：`/api` → `/api/*`，`/` → `/*`（含 `/:` 的参数路由保持原样）。所有 host 的 path 合并成一张全局路由表注册到框架，同一条 path 只注册一次，多个 host 声明同一 path 不会冲突。

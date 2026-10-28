@@ -559,10 +559,8 @@ class Proxy {
           intervalCount: 0,
           rewrite: (tmp.rewrite && typeof tmp.rewrite === 'function') ? tmp.rewrite : null,
           connectOptions: { ...this.connectOptions },
-          // 每个后端独立 Agent，https/http 分别创建
-          agent: tmp.urlobj.protocol === 'https:'
-            ? new https.Agent({ ...agentOptions, rejectUnauthorized: false, requestCert: false })
-            : new http.Agent(agentOptions)
+          // 每个后端独立 Agent，见下方 connectOptions 合并之后的创建
+          agent: null
         }
 
         // FIX: 原来是 typeof tmp.connectOptions（永远 truthy），修正为严格类型判断
@@ -570,6 +568,22 @@ class Proxy {
           for (let o in tmp.connectOptions) {
             backend_obj.connectOptions[o] = tmp.connectOptions[o]
           }
+        }
+
+        // 每个后端独立 Agent，https/http 分别创建。
+        // Agent 自身的选项优先于单次请求的选项，所以后端证书校验开关必须在创建 Agent 时
+        // 按 connectOptions 确定，只写在请求选项里是覆盖不了的。
+        // 默认仍不校验后端证书；connectOptions 里显式给出 rejectUnauthorized 才按其值，
+        // 此时可配合 ca 等选项（它们不在 Agent 里，随请求选项生效）。
+        if (tmp.urlobj.protocol === 'https:') {
+          const verify = backend_obj.connectOptions.rejectUnauthorized
+          backend_obj.agent = new https.Agent({
+            ...agentOptions,
+            rejectUnauthorized: verify === undefined ? false : !!verify,
+            requestCert: false
+          })
+        } else {
+          backend_obj.agent = new http.Agent(agentOptions)
         }
 
         if (tmp.headers !== undefined) {

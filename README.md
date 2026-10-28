@@ -2123,6 +2123,31 @@ new Proxy({ setRealIP : true, addIP : true, config : cfg })
 
 > Note: nginx by default also pairs this with `proxy_redirect default`, which rewrites absolute `Location` values in backend responses back to the proxy's address. There is **no** such response-header rewriting here. If a backend returns absolute URLs containing its own domain, users will be sent to the backend's domain; handle it in the backend, or adjust with `resHeaders` / `resHeadersCallback`.
 
+**Certificate verification for https backends:**
+
+When proxying to an `https://` backend, the backend certificate is **not verified** by default (convenient for internal services with self-signed certificates). To verify it, set `rejectUnauthorized: true` explicitly in `connectOptions`, either on the instance (all backends) or on a single backend (which takes precedence). If the backend certificate is not issued by a public CA, use `ca` to name the trusted certificate. A request whose verification fails never reaches the backend and the proxy answers with a 5xx.
+
+```javascript
+new Proxy({
+    // instance level: verify the certificate of every https backend
+    connectOptions : { rejectUnauthorized : true },
+    config : {
+        'xyz.com': [
+            {
+                url : 'https://ioo.com',
+                // backend level: for a certificate issued by your own CA, name the trusted CA certificate (or the self-signed certificate itself)
+                connectOptions : { ca : fs.readFileSync('./ca.pem') }
+            },
+            {
+                url : 'https://legacy.internal',
+                // backend level overrides instance level: turn verification off for this backend only
+                connectOptions : { rejectUnauthorized : false }
+            }
+        ]
+    }
+})
+```
+
 **Path matching and cross-host fallback:**
 
 The `path` in a backend entry is normalized into a prefix route: `/api` → `/api/*`, `/` → `/*` (parameter routes containing `/:` are kept as-is). Paths from all hosts are merged into a single global route table and registered with the framework; each distinct path is registered exactly once, so multiple hosts declaring the same path never conflict.
