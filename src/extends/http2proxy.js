@@ -139,6 +139,12 @@ function mapErrorStatus(err) {
   return 503
 }
 
+// minConnect 归一化：<=0 统一为 0（不预建连接、不维持连接池）；非有限数字返回 null
+function normalizeMinConnect(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null
+  return v <= 0 ? 0 : v
+}
+
 function fmtpath(path) {
   //必须与 router.addPath() 的归一化保持一致：连续斜杠先合并，
   //否则 pathTable 的 key 与路由注册后的 key 不一致，运行期恒查不到。
@@ -233,6 +239,10 @@ let Http2Proxy = function (options = {}) {
 
   this.maxAliveStreams = 100
 
+  // 单后端常驻连接数。undefined 表示沿用连接池默认值（2）；
+  // <=0 时不预建连接，首个请求到来才建连，空闲回收后也不补连。
+  this.minConnect = undefined
+
   this.addIP = false
 
   this.debug = false
@@ -284,6 +294,14 @@ let Http2Proxy = function (options = {}) {
       case 'requestTimeout':
         if (typeof options[k] === 'number' && !isNaN(options[k])) {
           this[k] = options[k]
+        }
+        break
+
+      case 'minConnect':
+        if (normalizeMinConnect(options[k]) !== null) {
+          this.minConnect = normalizeMinConnect(options[k])
+        } else {
+          console.error(`minConnect 必须是数字: ${options[k]}`)
         }
         break
 
@@ -448,6 +466,14 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
   if (tmp.maxAliveStreams && typeof tmp.maxAliveStreams === 'number' && tmp.maxAliveStreams > 0)
     backend_obj.maxAliveStreams = tmp.maxAliveStreams
 
+  if (tmp.minConnect !== undefined) {
+    if (normalizeMinConnect(tmp.minConnect) !== null) {
+      backend_obj.minConnect = normalizeMinConnect(tmp.minConnect)
+    } else {
+      console.error(`${tmp.url} ${tmp.path}：minConnect 必须是数字: ${tmp.minConnect}`)
+    }
+  }
+
 }
 
 Http2Proxy.prototype.setHostProxy = function (cfg) {
@@ -508,6 +534,7 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         timeout: this.timeout,
         connectTimeout: this.connectTimeout,
         maxAliveStreams: this.maxAliveStreams,
+        minConnect: this.minConnect,
         // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
         requestTimeout: tmp.requestTimeout,
         // 透传后端级请求体上限；undefined 表示未设置，回退到代理实例配置
@@ -535,10 +562,14 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         timeout: backend_obj.timeout,
         connectTimeout: backend_obj.connectTimeout,
         maxAliveStreams: backend_obj.maxAliveStreams,
-        maxConnect: backend_obj.maxConnect
+        maxConnect: backend_obj.maxConnect,
+        minConnect: backend_obj.minConnect
       })
 
-      backend_obj.h2Pool.createPool()
+      // minConnect <= 0：不预建连接，首个请求到来时才建连；undefined 沿用连接池默认（预热）
+      if (backend_obj.minConnect === undefined || backend_obj.minConnect > 0) {
+        backend_obj.h2Pool.createPool()
+      }
 
       if (this.hostProxy[keys[0]][pt] === undefined) {
 
