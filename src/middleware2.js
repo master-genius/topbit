@@ -18,17 +18,25 @@ class Middleware extends MidCore {
       //若写成 return this.exec(...)，rejection 会绕过本层 catch。
       return await this.exec(ctx, ctx.group);
     } catch (err) {
-      this.errorHandle(err, '--ERR-RESPONSE--');
-      if (ctx.stream && !ctx.stream.destroyed && ctx.stream.writable) {
-        try {
+      //任一侧失败都不影响另一侧——否则 respond/end 抛错会跳过 errorHandle，链上错误永久丢失。
+      try {
+        this.errorHandle(err, '--ERR-RESPONSE--');
+      } catch (e) {
+        this.debug && console.error('--ERR-RESPONSE-handle--', e);
+      }
+
+      //此处失败不再上抛：调用方(http2 stream handler)不 await run()，
+      //抛出会变成 unhandledRejection，而错误已经留痕，冒泡没有价值。
+      try {
+        if (ctx.stream && !ctx.stream.destroyed && ctx.stream.writable) {
           if (!ctx.stream.headersSent) {
-            ctx.stream.respond({
-              ':status' : '500'
-            });
+            ctx.stream.respond({ ':status' : '500' });
           }
-          //ctx.stream.close();
+
           ctx.stream.end();
-        } catch (err) {}
+        }
+      } catch (e) {
+        this.debug && console.error('--ERR-RESPONSE-write--', e);
       }
     }
   }

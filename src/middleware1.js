@@ -17,13 +17,23 @@ class Middleware extends MidCore {
       //若写成 return this.exec(...)，rejection 会绕过本层 catch。
       return await this.exec(ctx, ctx.group);
     } catch (err) {
-      this.errorHandle(err, '--ERR-res--');
+      //任一侧失败都不影响另一侧——否则写响应抛错会跳过 errorHandle，链上错误永久丢失。
+      try {
+        this.errorHandle(err, '--ERR-res--');
+      } catch (e) {
+        this.debug && console.error('--ERR-res-handle--', e);
+      }
+
+      //此处失败不再上抛：调用方(http1 onRequest)不 await run()，
+      //抛出会变成 unhandledRejection，而错误已经留痕，冒泡没有价值。
       try {
         if (ctx.res && !ctx.res.writableEnded) {
           ctx.res.statusCode = 500;
           ctx.res.end();
         }
-      } catch (err) {}
+      } catch (e) {
+        this.debug && console.error('--ERR-res-write--', e);
+      }
     }
   }
 
