@@ -2084,17 +2084,51 @@ app.run(1234)
 
 ```javascript
 config: {
+    // key 是用户访问的域名
     'xyz.com': [
         {
+            // 实际代理到的后端；不自定义时，后端收到的 Host 是 ioo.com:8080
             url : 'http://ioo.com:8080',
-            // 让后端看到用户访问的域名
+            // 自定义 Host：让后端看到用户访问的域名
             headers : { host : 'xyz.com' }
         }
     ]
 }
 ```
 
+后端是 `https://`（代理与后端之间走 TLS）时还有一点：`Proxy` 和 `ProxyNoAgent` 在没有显式指定 `servername` 时，会取请求的 `Host` 值作为 TLS 握手的 SNI，所以配置了 `headers.host` 后，SNI 也会跟着变成这个值。如果后端证书签给的是后端自己的名字，需要同时配置 `connectOptions.servername`，让握手仍使用后端的名字：
+
+```javascript
+{
+    // https 后端：代理与后端之间走 TLS
+    url : 'https://ioo.com',
+    // 请求里的 Host 是 xyz.com；不处理的话，TLS 握手的 SNI 也会变成 xyz.com
+    headers : { host : 'xyz.com' },
+    // 显式指定 SNI，让 TLS 握手仍用后端自己的名字
+    connectOptions : { servername : 'ioo.com' }
+}
+```
+
+没有配置 `headers.host` 时不受影响，SNI 就是后端地址的主机名。
+
 配置是按用户访问的 host 分组的，所以每组写一个静态值即可。客户端请求自带的请求头会原样转发，配置里的同名 `headers` 会覆盖它，这是通用规则，对所有头一视同仁。
+
+**从旧版本迁移时的注意点：**
+
+- 后端做 `Origin` / `Referer` / 同源 / CSRF 校验：Host 改为后端地址后，客户端的 `Origin`、`Referer` 仍原样转发，两者不再一致，校验可能拒绝请求（POST / PUT 最明显）。需要用 `headers.host` 设回用户访问的域名，使它与 `Origin` 一致；也可以在 `headers` 里改写 `origin` / `referer`。注意配置里不支持「删除」某个头：值写 `undefined` 会导致请求失败，写 `null` 会发出字符串 `"null"`。
+- 多级代理：第一层转发给第二层时，发出的 `Host` 是第二层的地址。如果第二层按用户访问的域名路由，第一层需要用 `headers.host` 设回原域名，否则第二层匹配不上。
+
+```javascript
+// 第一层代理：转发给第二层时保持用户访问的域名，第二层才能按它路由
+config: {
+    'xyz.com': [
+        {
+            url : 'http://127.0.0.1:8081',   // 第二层代理的地址
+            headers : { host : 'xyz.com' }   // 不设置的话，第二层收到的 Host 是 127.0.0.1:8081
+        }
+    ]
+}
+```
 
 **自动注入的请求头：**
 
@@ -2105,6 +2139,8 @@ config: {
     'xyz.com': [
         {
             url : 'http://ioo.com',
+            // 代理不会自动添加这两个头；后端需要知道原始域名和协议时，自己设置。
+            // 配置按用户访问的域名分组，所以每组写一个静态值即可
             headers : { 'x-real-host' : 'xyz.com', 'x-real-proto' : 'https' }
         }
     ]
@@ -2122,6 +2158,8 @@ new Proxy({ setRealIP : true, addIP : true, config : cfg })
 ```
 
 > 注意：客户端自己带来的 `x-real-host` / `x-real-proto` 不会被屏蔽。后端若信任这些头，需要在配置里写同名头覆盖，或由前置的可信代理清除。多级代理开启 `addIP` 时，会信任上级传来的 `x-real-ip`，请只在上级是可信代理时使用。
+
+> 注意：`setRealIP` 写入的是框架认定的客户端 IP，即 `c.ip`。使用 RealIP 扩展或核心选项 `realIP` 时，`c.ip` 与访问日志里的 IP 都取自请求头，只应放在可信上游之后；直接面向客户端的服务不要开启它们，否则客户端伪造的值会被当作真实 IP。
 
 > 注意：nginx 默认还会配合 `proxy_redirect default` 把后端响应里的绝对 `Location` 改回代理地址，这里**没有**这类响应头改写。后端返回带自己域名的绝对地址时，用户会被带到后端域名，需要后端自行处理，或用 `resHeaders` / `resHeadersCallback` 调整。
 

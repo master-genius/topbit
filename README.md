@@ -2043,17 +2043,51 @@ To customize it, set `host` in the backend's `headers` (`:authority` is equivale
 
 ```javascript
 config: {
+    // the key is the domain the user visits
     'xyz.com': [
         {
+            // the backend actually proxied to; without a custom Host it receives ioo.com:8080
             url : 'http://ioo.com:8080',
-            // let the backend see the domain the user visited
+            // custom Host: let the backend see the domain the user visited
             headers : { host : 'xyz.com' }
         }
     ]
 }
 ```
 
+One more thing when the backend is `https://` (TLS between the proxy and the backend): without an explicit `servername`, `Proxy` and `ProxyNoAgent` use the request's `Host` value as the SNI of the TLS handshake, so once you configure `headers.host` the SNI changes to that value too. If the backend's certificate is issued for the backend's own name, also set `connectOptions.servername` so the handshake keeps using the backend's name:
+
+```javascript
+{
+    // https backend: TLS between the proxy and the backend
+    url : 'https://ioo.com',
+    // the request carries Host: xyz.com; left alone, the TLS handshake's SNI becomes xyz.com too
+    headers : { host : 'xyz.com' },
+    // set the SNI explicitly so the handshake still uses the backend's own name
+    connectOptions : { servername : 'ioo.com' }
+}
+```
+
+Without `headers.host` nothing changes: the SNI is the hostname of the backend address.
+
 Configuration is grouped by the host the user visited, so one static value per group is enough. Headers sent by the client are forwarded as-is, and a configured `headers` entry of the same name overrides them — a general rule that applies to every header alike.
+
+**Notes when migrating from an older version:**
+
+- Backends that check `Origin` / `Referer` / same-origin / CSRF: once Host is the backend's address, the client's `Origin` and `Referer` are still forwarded as-is, so the two no longer agree and the check may reject the request (POST / PUT most visibly). Use `headers.host` to set it back to the domain the user visited so it matches `Origin`; you can also rewrite `origin` / `referer` in `headers`. Note that the config cannot "delete" a header: a value of `undefined` makes the request fail and `null` sends the string `"null"`.
+- Multi-level proxies: when the first level forwards to the second, the `Host` it sends is the second level's address. If the second level routes by the domain the user visited, the first level must set it back with `headers.host`, otherwise the second level cannot match.
+
+```javascript
+// First-level proxy: keep the domain the user visited so the second level can route by it
+config: {
+    'xyz.com': [
+        {
+            url : 'http://127.0.0.1:8081',   // address of the second-level proxy
+            headers : { host : 'xyz.com' }   // without this the second level receives Host: 127.0.0.1:8081
+        }
+    ]
+}
+```
 
 **Automatically injected headers:**
 
@@ -2064,6 +2098,9 @@ config: {
     'xyz.com': [
         {
             url : 'http://ioo.com',
+            // the proxy does not add these two headers; set them yourself if the backend needs
+            // the original domain and protocol. Config is grouped by the domain the user visits,
+            // so one static value per group is enough
             headers : { 'x-real-host' : 'xyz.com', 'x-real-proto' : 'https' }
         }
     ]
@@ -2081,6 +2118,8 @@ new Proxy({ setRealIP : true, addIP : true, config : cfg })
 ```
 
 > Note: `x-real-host` / `x-real-proto` sent by the client itself are not filtered. A backend that trusts them should override them with a same-named header in the config, or have a trusted proxy in front strip them. With `addIP` enabled in a multi-level setup, the `x-real-ip` coming from upstream is trusted — use it only when the upstream is a trusted proxy.
+
+> Note: `setRealIP` writes the IP the framework considers the client's, i.e. `c.ip`. With the RealIP extension or the core `realIP` option, both `c.ip` and the IP in the access log come from request headers, so they belong behind a trusted upstream only; do not enable them on a service that faces clients directly, or a forged value will be treated as the real IP.
 
 > Note: nginx by default also pairs this with `proxy_redirect default`, which rewrites absolute `Location` values in backend responses back to the proxy's address. There is **no** such response-header rewriting here. If a backend returns absolute URLs containing its own domain, users will be sent to the backend's domain; handle it in the backend, or adjust with `resHeaders` / `resHeadersCallback`.
 
