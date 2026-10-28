@@ -2076,6 +2076,28 @@ app.run(1234)
 
 ```
 
+**转发给后端的 Host：**
+
+默认行为与 nginx 的 `proxy_set_header Host $proxy_host` 一致：发给后端的 `Host`（h2 后端为 `:authority`）是**后端自己的地址**，即配置里 `url` 的主机和端口（默认端口省略），而不是用户访问的域名。用户访问 `xyz.com`、代理到 `ioo.com` 时，后端收到的 `Host` 是 `ioo.com`。`Proxy`、`ProxyNoAgent`、`Http2Proxy` 行为相同，与下游是 h1 还是 h2 无关。
+
+需要自定义时，在后端配置的 `headers` 里设置 `host`（h2 后端写 `:authority` 等价），设置了就使用自定义值：
+
+```javascript
+config: {
+    'xyz.com': [
+        {
+            url : 'http://ioo.com:8080',
+            // 让后端看到用户访问的域名
+            headers : { host : 'xyz.com' }
+        }
+    ]
+}
+```
+
+配置是按用户访问的 host 分组的，所以每组写一个静态值即可。客户端请求自带的请求头会原样转发，配置里的同名 `headers` 会覆盖它，这是通用规则，对所有头一视同仁。
+
+> 注意：nginx 默认还会配合 `proxy_redirect default` 把后端响应里的绝对 `Location` 改回代理地址，这里**没有**这类响应头改写。后端返回带自己域名的绝对地址时，用户会被带到后端域名，需要后端自行处理，或用 `resHeaders` / `resHeadersCallback` 调整。
+
 **路径匹配与跨 host 降级：**
 
 配置里的 `path` 会被规范成前缀路由：`/api` → `/api/*`，`/` → `/*`（含 `/:` 的参数路由保持原样）。所有 host 的 path 合并成一张全局路由表注册到框架，同一条 path 只注册一次，多个 host 声明同一 path 不会冲突。

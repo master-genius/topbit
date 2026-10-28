@@ -67,11 +67,12 @@ function cleanHeadersForHttp1(headers) {
     if (HTTP2_PSEUDO_HEADERS[k]) continue
     if (HOP_BY_HOP_HEADERS[k] || extraHop[k]) continue
 
-    h1Headers[k] = headers[k]
-  }
+    // Host 是「客户端 → 代理」这一跳的目标，不属于后端，默认不转发：
+    // 缺省时 Node 按后端地址生成（与 nginx 的 $proxy_host 一致）。
+    // 需要自定义时用后端配置 headers 的 host（或 :authority）覆盖。
+    if (k === 'host') continue
 
-  if (!h1Headers.host && headers[':authority']) {
-    h1Headers.host = headers[':authority']
+    h1Headers[k] = headers[k]
   }
 
   return h1Headers

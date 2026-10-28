@@ -125,7 +125,7 @@ if (mode === 'proxy' || mode === 'noagent') {
     check('upgrade 被剥离', echoed.h.upgrade === undefined);
     check('proxy-connection 被剥离', echoed.h['proxy-connection'] === undefined);
     check('正常头透传 (x-keep)', echoed.h['x-keep'] === 'kept');
-    check('host 透传', echoed.h.host === 'hop.test');
+    check('host 不转发客户端的值，默认为后端地址', echoed.h.host === '127.0.0.1:39861', `实际 ${echoed.h.host}`);
     check('路径+query 透传', echoed.url === '/echo?q=1');
 
     // ---- 响应方向：后端 hop 头不透传给客户端 ----
@@ -183,7 +183,9 @@ const out = fmt.call(null, {
 
 check('fmtHeaders :method', out[':method'] === 'POST');
 check('fmtHeaders :path（无 :path 头时取 ctx.path）', out[':path'] === '/a?b=1');
-check('fmtHeaders host → :authority', out[':authority'] === 'h2.test');
+check('fmtHeaders 不把入站 host 转成 :authority', out[':authority'] === undefined && out.host === undefined);
+check('fmtHeaders 配置的 :authority 保留',
+  fmt.call(null, { host: 'h2.test', ':authority': 'cfg.example' }, { method: 'GET', path: '/' })[':authority'] === 'cfg.example');
 check('fmtHeaders Connection 额外头剥离 (x-h)', out['x-h'] === undefined);
 check('fmtHeaders proxy-authorization 剥离', out['proxy-authorization'] === undefined);
 check('fmtHeaders proxy-authenticate 剥离', out['proxy-authenticate'] === undefined);

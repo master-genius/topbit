@@ -2035,6 +2035,28 @@ pxy.init(app)
 app.run(1234)
 ```
 
+**The Host sent to the backend:**
+
+By default this matches nginx's `proxy_set_header Host $proxy_host`: the `Host` sent to the backend (`:authority` for h2 backends) is the **backend's own address** — the host and port of the `url` in the config (default ports omitted) — not the domain the user visited. If a user visits `xyz.com` and the request is proxied to `ioo.com`, the backend receives `Host: ioo.com`. `Proxy`, `ProxyNoAgent` and `Http2Proxy` behave the same, whether the downstream is h1 or h2.
+
+To customize it, set `host` in the backend's `headers` (`:authority` is equivalent for h2 backends); a configured value is used as-is:
+
+```javascript
+config: {
+    'xyz.com': [
+        {
+            url : 'http://ioo.com:8080',
+            // let the backend see the domain the user visited
+            headers : { host : 'xyz.com' }
+        }
+    ]
+}
+```
+
+Configuration is grouped by the host the user visited, so one static value per group is enough. Headers sent by the client are forwarded as-is, and a configured `headers` entry of the same name overrides them — a general rule that applies to every header alike.
+
+> Note: nginx by default also pairs this with `proxy_redirect default`, which rewrites absolute `Location` values in backend responses back to the proxy's address. There is **no** such response-header rewriting here. If a backend returns absolute URLs containing its own domain, users will be sent to the backend's domain; handle it in the backend, or adjust with `resHeaders` / `resHeadersCallback`.
+
 **Path matching and cross-host fallback:**
 
 The `path` in a backend entry is normalized into a prefix route: `/api` → `/api/*`, `/` → `/*` (parameter routes containing `/:` are kept as-is). Paths from all hosts are merged into a single global route table and registered with the framework; each distinct path is registered exactly once, so multiple hosts declaring the same path never conflict.

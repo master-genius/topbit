@@ -58,7 +58,7 @@ h2backend.on('stream', (stream, headers) => {
 function makeConfig(port) {
   const url = `http://127.0.0.1:${port}`
   return {
-    // 对照组：不配 headers，目标 Host 应保持客户端的原值
+    // 对照组：不配 headers，目标 Host 应是后端自己的地址，而不是客户端的原值
     'plain.test': [{ path: '/', url, aliveCheckInterval: 0 }],
     // 配置 :authority 写法
     'auth.test': [{ path: '/', url, aliveCheckInterval: 0, headers: { ':authority': 'override-a.example' } }],
@@ -112,14 +112,15 @@ function parse(code, body, xres) {
 }
 
 // 单个用例的期望：[host key] → 后端应收到的目标 Host
+// DEFAULT 表示未配置覆盖：后端应收到它自己的地址 127.0.0.1:<后端端口>
 const EXPECT_AUTHORITY = {
-  'plain.test': 'plain.test',
+  'plain.test': 'DEFAULT',
   'auth.test': 'override-a.example',
   'host.test': 'override-h.example',
-  'case.test': 'case.test',
+  'case.test': 'DEFAULT',
 }
 
-async function runMatrix(label, port, clients) {
+async function runMatrix(label, port, backendPort, clients) {
   for (const [cname, call] of clients) {
     for (const host of Object.keys(EXPECT_AUTHORITY)) {
       const r = await Promise.race([
@@ -129,8 +130,11 @@ async function runMatrix(label, port, clients) {
       const tag = `${label} ← ${cname} [${host}]`
 
       check(`${tag} 状态 200`, r.code === 200, `实际 ${r.code} ${r.err || (r.body || '').slice(0, 60)}`)
-      check(`${tag} 目标 Host`, r.json.authority === EXPECT_AUTHORITY[host],
-        `期望 ${EXPECT_AUTHORITY[host]} 实际 ${r.json.authority}`)
+      const expectAuthority = EXPECT_AUTHORITY[host] === 'DEFAULT'
+        ? `127.0.0.1:${backendPort}`
+        : EXPECT_AUTHORITY[host]
+      check(`${tag} 目标 Host`, r.json.authority === expectAuthority,
+        `期望 ${expectAuthority} 实际 ${r.json.authority}`)
 
       if (host === 'case.test') {
         check(`${tag} 请求头大小写覆盖 x-foo`, r.json.xfoo === 'cfg', `实际 ${r.json.xfoo}`)
@@ -157,10 +161,10 @@ h1backend.listen(H1_BACKEND_PORT, '127.0.0.1', () => {
 
     await new Promise(r => setTimeout(r, 600))
 
-    await runMatrix('Proxy(h1后端)', 39911, [['ALPN h1', callH1], ['ALPN h2', callH2]])
-    await runMatrix('Proxy(h1后端)', 39912, [['纯 h2', callH2]])
-    await runMatrix('Http2Proxy(h2后端)', 39913, [['ALPN h1', callH1], ['ALPN h2', callH2]])
-    await runMatrix('Http2Proxy(h2后端)', 39914, [['纯 h2', callH2]])
+    await runMatrix('Proxy(h1后端)', 39911, H1_BACKEND_PORT, [['ALPN h1', callH1], ['ALPN h2', callH2]])
+    await runMatrix('Proxy(h1后端)', 39912, H1_BACKEND_PORT, [['纯 h2', callH2]])
+    await runMatrix('Http2Proxy(h2后端)', 39913, H2_BACKEND_PORT, [['ALPN h1', callH1], ['ALPN h2', callH2]])
+    await runMatrix('Http2Proxy(h2后端)', 39914, H2_BACKEND_PORT, [['纯 h2', callH2]])
 
     console.log(`\n结果: ${pass} pass, ${fail} fail`)
     process.exit(fail > 0 ? 1 : 0)

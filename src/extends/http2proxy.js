@@ -703,8 +703,8 @@ Http2Proxy.prototype.fmtHeaders = function (headers, ctx) {
         break
 
       case 'host':
-        // 配置里显式给出的 :authority 优先于入站 host，不依赖键的遍历顺序
-        if (headers[':authority'] === undefined) http2_headers[':authority'] = headers[k]
+        // 入站 host 是「客户端 → 代理」这一跳的目标，不属于后端，不转成 :authority；
+        // 缺省时由连接池按后端地址生成。配置里显式给出的 :authority 走 default 分支带出
         break
 
       default:
@@ -842,7 +842,20 @@ Http2Proxy.prototype.mid = function () {
 
           let stm = null
 
-          stm = await hii.request(c.major > 1 ? c.headers : this.fmtHeaders(c.headers, c))
+          // 出站头。入站的 Host / :authority 是「客户端 → 代理」这一跳的目标，默认不转发，
+          // 缺省时由连接池按后端地址生成；只有配置显式给出 :authority（host 写法已归一）才使用。
+          // h1 下游由 fmtHeaders 丢弃 host；h2 下游的 c.headers 本身就是出站头，
+          // 这里复制一份再剔除，避免改动上下文里的请求头。
+          let outHeaders
+          if (c.major > 1) {
+            outHeaders = Object.assign({}, c.headers)
+            delete outHeaders.host
+            if (!pr.headers || pr.headers[':authority'] === undefined) delete outHeaders[':authority']
+          } else {
+            outHeaders = this.fmtHeaders(c.headers, c)
+          }
+
+          stm = await hii.request(outHeaders)
                         .catch(err => {
                             failsafe(err)
                             stm = null
