@@ -270,6 +270,90 @@ async function testColdStartNoFanout() {
   console.log(`  ✓ 冷启动扇出：10 并发 → ${sessions} 条连接（对端配额充足时不扩容）`)
 }
 
+// 取一个当前无人监听的端口
+async function freePort() {
+  const s = http2.createServer()
+  await new Promise(rv => s.listen(0, '127.0.0.1', rv))
+  const port = s.address().port
+  await new Promise(rv => s.close(rv))
+  return port
+}
+
+function simpleGet(pool) {
+  return pool.request({ ':path': '/' }).then(stm => new Promise((rv, rj) => {
+    stm.on('error', rj)
+    stm.on('close', rv)
+    stm.resume()
+  }))
+}
+
+// ---------- 用例7：minConnect<=0 的失败窗口：窗口内不可用，窗口后放行，恢复后自愈 ----------
+async function testZeroMinConnectFailWindow() {
+  for (const mc of [0, -1]) {
+    const port = await freePort()
+    const pool = new Http2Pool({
+      url: `http://127.0.0.1:${port}`,
+      minConnect: mc,
+      failWindow: 400,
+      timeout: 200
+    })
+
+    // 不调用 createPool：池一直为空，直到有请求才建连（lazy 语义）
+    await sleep(100)
+    assert.strictEqual(pool.sessions.length, 0, `minConnect=${mc} 时不应自行建连`)
+    assert.ok(pool.ok(), '从未失败过，空池应判为可用')
+
+    // 对死端口发请求：建连失败，并且不得有后台重连
+    await simpleGet(pool).then(
+      () => assert.fail('死端口不应请求成功'),
+      () => {}
+    )
+    await sleep(50)
+    assert.strictEqual(pool.ok(), false, `minConnect=${mc}：失败窗口内应判为不可用`)
+
+    await sleep(500)
+    assert.strictEqual(pool.sessions.length, 0, `minConnect=${mc}：失败后不得后台重连`)
+    assert.ok(pool.ok(), `minConnect=${mc}：窗口过后应放行探测`)
+
+    // 后端恢复：放行的那个请求应当成功，并复位失败标记
+    const srv = http2.createServer()
+    srv.on('stream', stream => { stream.respond({ ':status': 200 }); stream.end('x') })
+    await new Promise(rv => srv.listen(port, '127.0.0.1', rv))
+    await simpleGet(pool)
+    assert.strictEqual(pool._lastFailedAt, 0, '连上之后应清零失败时间')
+    assert.ok(pool.ok(), '恢复后应判为可用')
+
+    // 空闲回收后池空且不补连
+    await sleep(800)
+    assert.strictEqual(pool.sessions.length, 0, '空闲连接应被回收且不补连')
+
+    srv.close()
+  }
+  console.log('  ✓ minConnect<=0：无预建、失败窗口内不可用、窗口后放行并自愈')
+}
+
+// ---------- 用例8（回归）：minConnect>0 的 ok() 不受失败窗口影响 ----------
+async function testPositiveMinConnectUnchanged() {
+  const port = await freePort()
+  const pool = new Http2Pool({
+    url: `http://127.0.0.1:${port}`,
+    minConnect: 2,
+    failWindow: 200,
+    reconnDelay: 60000,
+    maxConnect: 2
+  })
+  pool.createPool(1)
+  await sleep(100)
+  assert.strictEqual(pool.ok(), false, '建连失败后应判为不可用')
+
+  await sleep(500)  // 远超 failWindow
+  assert.strictEqual(
+    pool.ok(), false,
+    'minConnect>0 时失败标记不得按时间自动失效，只能由成功建连复位'
+  )
+  console.log('  ✓ 回归：minConnect>0 时失败标记不受 failWindow 影响')
+}
+
 ;(async () => {
   console.log('Http2Pool 回归测试')
   await testGoawayDrain()
@@ -278,6 +362,8 @@ async function testColdStartNoFanout() {
   await testOkAfterIdleReclaim()
   await testColdStartNoOverflow()
   await testColdStartNoFanout()
+  await testZeroMinConnectFailWindow()
+  await testPositiveMinConnectUnchanged()
   console.log('全部通过')
   process.exit(0)
 })().catch(err => {

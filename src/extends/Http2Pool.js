@@ -68,6 +68,14 @@ class Http2Pool {
     this._reconnTimer = null
     // 最近一次建连是否失败：区分"空闲回收后的空池"与"后端不可用"
     this._lastConnectFailed = false
+    // 最近一次失败的时间戳（毫秒）。仅 minConnect <= 0 时参与 ok() 判定
+    this._lastFailedAt = 0
+    /**
+     * minConnect <= 0 的失败窗口（毫秒）：窗口内 ok() 判为不可用，窗口过后放行探测。
+     * 常驻为 0 时没有后台重连，失败标记无人复位；若不设窗口，后端恢复后
+     * 仍会被 ok() 永久剔除，再也收不到请求来证明自己已恢复。
+     */
+    this.failWindow = options.failWindow === undefined ? 3000 : options.failWindow
   }
 
   /**
@@ -266,6 +274,7 @@ class Http2Pool {
       // 连接恢复，退避计数归零
       this._reconnAttempts = 0
       this._lastConnectFailed = false
+      this._lastFailedAt = 0
       // 触发队列中的等待者
       this._dispatchWaiters(wrapper)
       // 仍不足最小连接数则继续补（单任务串行，不并发建连）
@@ -299,6 +308,7 @@ class Http2Pool {
         if(this.debug) console.error(`[H2Pool] Session Error ${this.url}:`, err.message)
         // 标记最近一次连接是失败的：ok() 据此把"空闲回收后的空池"与"后端真的挂了"区分开
         this._lastConnectFailed = true
+        this._lastFailedAt = Date.now()
         cleanup()
     })
 
@@ -437,8 +447,15 @@ class Http2Pool {
   ok() {
       if (this.sessions.some(s => s.connected && !s.session.destroyed)) return true
 
+      if (this.sessions.length >= this.maxConnect) return false
+
+      // minConnect <= 0：无后台重连，失败标记只在 failWindow 内有效，过后放行下一个请求去探测
+      if (this.minConnect <= 0) {
+        return !this._lastConnectFailed || Date.now() - this._lastFailedAt >= this.failWindow
+      }
+
       // 池空但仍可按需建连，且最近一次建连没有失败 → 视为可用
-      return this.sessions.length < this.maxConnect && !this._lastConnectFailed
+      return !this._lastConnectFailed
   }
 }
 
