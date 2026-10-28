@@ -145,6 +145,11 @@ function normalizeMinConnect(v) {
   return v <= 0 ? 0 : v
 }
 
+// queueTimeout 校验：必须是大于 0 的有限数字（连接池对 0 会静默回退默认值，这里直接拒绝以免误导）
+function validQueueTimeout(v) {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0
+}
+
 function fmtpath(path) {
   //必须与 router.addPath() 的归一化保持一致：连续斜杠先合并，
   //否则 pathTable 的 key 与路由注册后的 key 不一致，运行期恒查不到。
@@ -243,6 +248,10 @@ let Http2Proxy = function (options = {}) {
   // <=0 时不预建连接，首个请求到来才建连，空闲回收后也不补连。
   this.minConnect = undefined
 
+  // 无可用并发配额时，请求在连接池等待队列中的最长滞留时间（毫秒）；后端未设置则继承此值。
+  // 冷启动（minConnect<=0 空闲回收后）并发请求会排队等握手完成，握手慢时需调大。
+  this.queueTimeout = 3000
+
   this.addIP = false
 
   this.debug = false
@@ -294,6 +303,14 @@ let Http2Proxy = function (options = {}) {
       case 'requestTimeout':
         if (typeof options[k] === 'number' && !isNaN(options[k])) {
           this[k] = options[k]
+        }
+        break
+
+      case 'queueTimeout':
+        if (validQueueTimeout(options[k])) {
+          this.queueTimeout = options[k]
+        } else {
+          console.error(`queueTimeout 必须是大于 0 的数字: ${options[k]}`)
         }
         break
 
@@ -466,6 +483,14 @@ Http2Proxy.prototype.checkAndSetConfig = function (backend_obj, tmp) {
   if (tmp.maxAliveStreams && typeof tmp.maxAliveStreams === 'number' && tmp.maxAliveStreams > 0)
     backend_obj.maxAliveStreams = tmp.maxAliveStreams
 
+  if (tmp.queueTimeout !== undefined) {
+    if (validQueueTimeout(tmp.queueTimeout)) {
+      backend_obj.queueTimeout = tmp.queueTimeout
+    } else {
+      console.error(`${tmp.url} ${tmp.path}：queueTimeout 必须是大于 0 的数字: ${tmp.queueTimeout}`)
+    }
+  }
+
   if (tmp.minConnect !== undefined) {
     if (normalizeMinConnect(tmp.minConnect) !== null) {
       backend_obj.minConnect = normalizeMinConnect(tmp.minConnect)
@@ -535,6 +560,7 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         connectTimeout: this.connectTimeout,
         maxAliveStreams: this.maxAliveStreams,
         minConnect: this.minConnect,
+        queueTimeout: this.queueTimeout,
         // 透传配置项的总时长上限；运行时判定：undefined 未设置，0 不限制
         requestTimeout: tmp.requestTimeout,
         // 透传后端级请求体上限；undefined 表示未设置，回退到代理实例配置
@@ -563,7 +589,8 @@ Http2Proxy.prototype.setHostProxy = function (cfg) {
         connectTimeout: backend_obj.connectTimeout,
         maxAliveStreams: backend_obj.maxAliveStreams,
         maxConnect: backend_obj.maxConnect,
-        minConnect: backend_obj.minConnect
+        minConnect: backend_obj.minConnect,
+        queueTimeout: backend_obj.queueTimeout
       })
 
       // minConnect <= 0：不预建连接，首个请求到来时才建连；undefined 沿用连接池默认（预热）
